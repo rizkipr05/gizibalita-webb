@@ -13,7 +13,7 @@ require_ortu();
 $q        = trim($_GET['q'] ?? '');
 $kategori = trim($_GET['kategori'] ?? '');
 
-// build query
+// build query dasar
 $sql = "
   SELECT a.id,
          a.judul,
@@ -25,43 +25,54 @@ $sql = "
   LEFT JOIN users u ON u.id = a.penulis_id
   WHERE a.status = 'Terbit'
 ";
+
 $params = [];
 $types  = '';
 
+// filter pencarian judul & konten
 if ($q !== '') {
-    $sql      .= " AND a.judul LIKE ?";
-    $params[] = '%'.$q.'%';
-    $types    .= 's';
+    $sql      .= " AND (a.judul LIKE ? OR a.konten LIKE ?)";
+    $like      = '%' . $q . '%';
+    $params[]  = $like;
+    $params[]  = $like;
+    $types    .= 'ss';
 }
 
+// filter kategori
 if ($kategori !== '') {
     $sql      .= " AND a.kategori = ?";
     $params[] = $kategori;
-    $types    .= 's';
+    $types   .= 's';
 }
 
+// urutkan terbaru
 $sql .= " ORDER BY a.created_at DESC";
 
+// siap query
 $stmt = $mysqli->prepare($sql);
-if ($params) {
+
+// bind parameter jika ada
+if (!empty($params)) {
     $stmt->bind_param($types, ...$params);
 }
+
 $stmt->execute();
 $res = $stmt->get_result();
 
+// kumpulkan data artikel + snippet
 $artikels = [];
 while ($row = $res->fetch_assoc()) {
-    // buat snippet singkat dari konten
-    $konten = strip_tags($row['konten'] ?? '');
-    if (mb_strlen($konten) > 160) {
-        $konten = mb_substr($konten, 0, 160) . '...';
-    }
-    $row['snippet'] = $konten;
+    $strip = strip_tags($row['konten'] ?? '');
+    $row['snippet'] = mb_strlen($strip) > 160
+        ? mb_substr($strip, 0, 160) . '...'
+        : $strip;
+
     $artikels[] = $row;
 }
+
 $stmt->close();
 
-// opsi kategori sama dengan sisi nakes
+// daftar kategori (sama dengan sisi nakes)
 $kategoriOpt = [
     'Gizi Buruk',
     'Gizi Kurang',
@@ -95,106 +106,164 @@ $kategoriOpt = [
       min-height: 100vh;
       display: flex;
       flex-direction: column;
-      background: radial-gradient(circle at top left, #e0f7ec 0, #ffffff 45%, #fdfdfd 100%);
+      background: radial-gradient(circle at top left, #f1fff7 0, #f8fffb 40%, #ffffff 100%);
     }
 
-    .navbar-ortu {
-      background: #ffffff;
-      box-shadow: 0 4px 18px rgba(15, 157, 88, 0.12);
+    /* NAVBAR */
+    .navbar-custom {
+      background: linear-gradient(120deg, var(--brand-main), #34c785);
     }
-    .navbar-ortu .navbar-brand {
-      color: var(--brand-dark) !important;
+    .navbar-custom .navbar-brand,
+    .navbar-custom .nav-link,
+    .navbar-custom .dropdown-item {
+      color: #fdfdfd !important;
     }
-    .navbar-ortu .nav-link {
-      color: #555 !important;
-      font-size: .92rem;
+    .navbar-custom .nav-link {
+      opacity: .85;
     }
-    .navbar-ortu .nav-link.active {
-      color: var(--brand-main) !important;
+    .navbar-custom .nav-link:hover {
+      opacity: 1;
+    }
+    .navbar-custom .nav-link.active {
       font-weight: 600;
+      border-bottom: 2px solid #ffffffcc;
+    }
+    .navbar-custom .dropdown-menu {
+      background: #ffffff;
+      border-radius: .75rem;
+      border: none;
+      box-shadow: 0 12px 30px rgba(0,0,0,0.1);
+      padding-top: .5rem;
+      padding-bottom: .5rem;
+    }
+    .navbar-custom .dropdown-item {
+      color: #444 !important;
+    }
+    .navbar-custom .dropdown-item.text-danger {
+      color: #dc3545 !important;
     }
 
+    /* MAIN CONTENT */
     .page-wrapper {
       flex: 1 0 auto;
-      padding: 28px 0 40px;
+      padding: 32px 0 40px;
     }
-
     .card-article {
       border: none;
-      border-radius: 1.1rem;
-      box-shadow: 0 14px 32px rgba(0,0,0,0.06);
+      border-radius: 1.2rem;
+      box-shadow: 0 16px 35px rgba(0,0,0,0.06);
       background: #ffffff;
-      transition: transform .18s ease, box-shadow .18s ease;
     }
-    .card-article:hover {
-      transform: translateY(-3px);
-      box-shadow: 0 18px 40px rgba(0,0,0,0.08);
-    }
-
     .badge-kategori {
-      background: var(--brand-soft);
+      background-color: var(--brand-soft);
       color: var(--brand-dark);
       border-radius: 999px;
+      padding: .25rem .75rem;
       font-size: .75rem;
-      padding: .25rem .7rem;
+      font-weight: 500;
+    }
+    .badge-status {
+      font-size: .95rem;
+      padding: .4rem .85rem;
+      border-radius: 999px;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: .35rem .75rem;
+      background-color: #f3faf6;
+      font-size: .8rem;
+      color: #3d6653;
+      border: 1px solid #e0f2ea;
     }
 
+    /* FOOTER */
     footer {
       flex-shrink: 0;
-      background: linear-gradient(120deg, #0b7542, #0b3a60);
-      color: #e9fdf2;
+      background: linear-gradient(120deg, #0b4125, #0b7542);
+      color: #e2f6ea;
       font-size: .85rem;
+    }
+    footer a {
+      color: #b8f3d1;
+      text-decoration: none;
+    }
+    footer a:hover {
+      text-decoration: underline;
     }
   </style>
 </head>
 <body>
 
-<!-- NAVBAR ORANG TUA -->
-<nav class="navbar navbar-expand-lg navbar-ortu">
+<!-- =============== NAVBAR =============== -->
+<nav class="navbar navbar-expand-lg navbar-custom shadow-sm">
   <div class="container-fluid px-4 px-md-5">
     <a class="navbar-brand fw-bold d-flex align-items-center" href="<?= BASE_URL ?>/ortu/dashboard.php">
-      <i class="bi bi-heart-fill text-success me-2"></i>
-      <span>GiziBalita | Orang Tua</span>
+      <i class="bi bi-heart-pulse-fill me-2"></i>
+      <span>GiziBalita</span>
     </a>
 
-    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarOrtu">
+    <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse" data-bs-target="#navbarOrtu">
       <span class="navbar-toggler-icon"></span>
     </button>
 
     <div class="collapse navbar-collapse" id="navbarOrtu">
       <ul class="navbar-nav ms-auto mb-2 mb-lg-0 align-items-lg-center">
+
         <li class="nav-item mx-lg-1">
-          <a class="nav-link" href="<?= BASE_URL ?>/ortu/dashboard.php">Beranda</a>
+          <a class="nav-link" href="<?= BASE_URL ?>/ortu/dashboard.php">
+            Beranda
+          </a>
         </li>
+
         <li class="nav-item mx-lg-1">
-          <a class="nav-link" href="<?= BASE_URL ?>/ortu/pemeriksaan_riwayat.php">Riwayat Gizi</a>
+          <a class="nav-link" href="<?= BASE_URL ?>/ortu/pemeriksaan_riwayat.php">
+            Riwayat Gizi
+          </a>
         </li>
+
         <li class="nav-item mx-lg-1">
-          <a class="nav-link" href="<?= BASE_URL ?>/ortu/grafik_perkembangan.php">Grafik Perkembangan</a>
+          <a class="nav-link" href="<?= BASE_URL ?>/ortu/grafik_perkembangan.php">
+            Grafik Perkembangan
+          </a>
         </li>
+
         <li class="nav-item mx-lg-1">
-          <a class="nav-link active" href="<?= BASE_URL ?>/ortu/artikel_list.php">Artikel</a>
+          <a class="nav-link active" href="<?= BASE_URL ?>/ortu/artikel_list.php">
+            Artikel
+          </a>
         </li>
+
         <li class="nav-item dropdown ms-lg-3">
           <a class="nav-link dropdown-toggle d-flex align-items-center" href="#" data-bs-toggle="dropdown">
-            <div class="rounded-circle bg-success bg-opacity-10 d-flex align-items-center justify-content-center me-2" style="width:32px;height:32px;">
-              <i class="bi bi-person-heart text-success"></i>
+            <div class="rounded-circle bg-white bg-opacity-25 d-flex align-items-center justify-content-center me-2" style="width:32px;height:32px;">
+              <i class="bi bi-person-fill"></i>
             </div>
             <span class="d-none d-sm-inline">
               <?= htmlspecialchars($_SESSION['name'] ?? 'Orang Tua'); ?>
             </span>
           </a>
-          <ul class="dropdown-menu dropdown-menu-end">
-            <li><a class="dropdown-item" href="<?= BASE_URL ?>/ortu/profile.php"><i class="bi bi-person-circle me-2"></i> Profil</a></li>
+          <ul class="dropdown-menu dropdown-menu-end mt-2">
+            <li>
+              <a class="dropdown-item" href="<?= BASE_URL ?>/ortu/profile.php">
+                <i class="bi bi-person-circle me-2"></i> Profil
+              </a>
+            </li>
             <li><hr class="dropdown-divider"></li>
-            <li><a class="dropdown-item text-danger" href="<?= BASE_URL ?>/logout.php"><i class="bi bi-box-arrow-right me-2"></i> Logout</a></li>
+            <li>
+              <a class="dropdown-item text-danger" href="<?= BASE_URL ?>/logout.php">
+                <i class="bi bi-box-arrow-right me-2"></i> Logout
+              </a>
+            </li>
           </ul>
         </li>
+
       </ul>
     </div>
   </div>
 </nav>
-<!-- END NAVBAR -->
+<!-- ============ END NAVBAR ============ -->
 
 <div class="page-wrapper">
   <div class="container-fluid px-4 px-md-5">
@@ -267,7 +336,7 @@ $kategoriOpt = [
               <div class="card-body d-flex flex-column">
 
                 <div class="d-flex justify-content-between align-items-center mb-2">
-                  <span class="badge badge-kategori">
+                  <span class="badge-kategori">
                     <?= htmlspecialchars($a['kategori']); ?>
                   </span>
                   <small class="text-muted">
