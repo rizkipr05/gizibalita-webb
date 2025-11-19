@@ -1,46 +1,64 @@
 <?php
 require_once __DIR__ . '/../../config/config.php';
 require_once __DIR__ . '/../../includes/auth.php';
+require_once __DIR__ . '/../../includes/db.php';
 require_nakes();
-
-// TODO: nanti ganti dummy ini dengan SELECT dari tabel `artikels`
-$artikelList = [
-    [
-        'id'        => 1,
-        'judul'     => 'Panduan Nutrisi Seimbang untuk Balita',
-        'kategori'  => 'Gizi Baik',
-        'created_at'=> '2025-03-01',
-        'status'    => 'Terbit',
-        'penulis'   => 'dr. Budi',
-    ],
-    [
-        'id'        => 2,
-        'judul'     => 'Mencegah Stunting di 1000 Hari Pertama Kehidupan',
-        'kategori'  => 'Stunting',
-        'created_at'=> '2025-02-20',
-        'status'    => 'Terbit',
-        'penulis'   => 'drg. Rina',
-    ],
-    [
-        'id'        => 3,
-        'judul'     => 'Mengatasi Gizi Kurang pada Balita dengan Pendekatan Keluarga',
-        'kategori'  => 'Gizi Kurang',
-        'created_at'=> '2025-02-10',
-        'status'    => 'Draft',
-        'penulis'   => 'dr. Budi',
-    ],
-];
 
 function statusBadgeClass($status) {
     switch ($status) {
-        case 'Terbit':
-            return 'bg-success';
-        case 'Draft':
-            return 'bg-secondary';
-        default:
-            return 'bg-light text-dark';
+        case 'Terbit': return 'bg-success';
+        case 'Draft':  return 'bg-secondary';
+        default:       return 'bg-light text-dark';
     }
 }
+
+// ambil filter
+$q        = trim($_GET['q'] ?? '');
+$kategori = trim($_GET['kategori'] ?? '');
+$status   = trim($_GET['status'] ?? '');
+
+// build query
+$sql = "
+  SELECT a.id, a.judul, a.kategori, a.status, a.created_at, u.name AS penulis
+  FROM artikels a
+  LEFT JOIN users u ON u.id = a.penulis_id
+  WHERE 1=1
+";
+$params = [];
+$types  = '';
+
+if ($q !== '') {
+    $sql .= " AND a.judul LIKE ?";
+    $params[] = '%'.$q.'%';
+    $types   .= 's';
+}
+
+if ($kategori !== '') {
+    $sql .= " AND a.kategori = ?";
+    $params[] = $kategori;
+    $types   .= 's';
+}
+
+if ($status !== '') {
+    $sql .= " AND a.status = ?";
+    $params[] = $status;
+    $types   .= 's';
+}
+
+$sql .= " ORDER BY a.created_at DESC";
+
+$stmt = $mysqli->prepare($sql);
+if ($params) {
+    $stmt->bind_param($types, ...$params);
+}
+$stmt->execute();
+$res = $stmt->get_result();
+
+$artikelList = [];
+while ($row = $res->fetch_assoc()) {
+    $artikelList[] = $row;
+}
+$stmt->close();
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -85,7 +103,7 @@ function statusBadgeClass($status) {
       border-bottom: 2px solid #ffffffcc;
     }
 
-    /* ✅ Dropdown tidak putih lagi, ikut tema navbar */
+    /* Dropdown ikut tema navbar */
     .navbar-nakes .dropdown-menu {
       background: linear-gradient(120deg, #0b5ed7cc, #0f9d58cc) !important;
       border-radius: 0.75rem;
@@ -350,7 +368,7 @@ function statusBadgeClass($status) {
                         <?= htmlspecialchars($a['status']); ?>
                       </span>
                     </td>
-                    <td><?= htmlspecialchars($a['penulis']); ?></td>
+                    <td><?= htmlspecialchars($a['penulis'] ?? '-'); ?></td>
                     <td>
                       <div class="btn-group btn-group-sm" role="group">
                         <a
@@ -368,7 +386,7 @@ function statusBadgeClass($status) {
                           <i class="bi bi-pencil"></i>
                         </a>
                         <a
-                          href="#"
+                          href="<?= BASE_URL ?>/nakes/artikel_delete.php?id=<?= (int)$a['id'] ?>"
                           class="btn btn-outline-danger"
                           title="Hapus"
                           onclick="return confirm('Yakin ingin menghapus artikel ini?');"

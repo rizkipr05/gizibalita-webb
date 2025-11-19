@@ -1,18 +1,31 @@
 <?php
 require_once __DIR__ . '/../../config/config.php';
 require_once __DIR__ . '/../../includes/auth.php';
+require_once __DIR__ . '/../../includes/db.php';
 require_nakes();
 
-/**
- * Catatan:
- * - Nanti di sini kamu bisa tambahkan logic:
- *   - Jika ada $_GET['id'] -> ambil data artikel dari DB dan isi form.
- *   - Jika POST -> simpan/update ke tabel `artikels`.
- */
+$userId = $_SESSION['user_id'] ?? null;
 
-// Contoh dummy data kalau mode edit (sementara pakai hardcode)
-$isEdit = isset($_GET['id']) && ctype_digit($_GET['id']);
-$artikelId = $isEdit ? (int)$_GET['id'] : null;
+if (!$userId) {
+    header('Location: ' . BASE_URL . '/login_nakes.php');
+    exit;
+}
+
+// deteksi edit / tambah
+$isEdit    = false;
+$artikelId = null;
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!empty($_POST['id']) && ctype_digit($_POST['id'])) {
+        $artikelId = (int)$_POST['id'];
+        $isEdit    = true;
+    }
+} else {
+    if (!empty($_GET['id']) && ctype_digit($_GET['id'])) {
+        $artikelId = (int)$_GET['id'];
+        $isEdit    = true;
+    }
+}
 
 // DEFAULT nilai form
 $formJudul    = '';
@@ -20,14 +33,8 @@ $formKategori = '';
 $formStatus   = 'Draft';
 $formKonten   = '';
 
-// TODO: nanti hapus dummy ini dan ganti dengan SELECT from DB
-if ($isEdit) {
-    // misal hasil query DB
-    $formJudul    = 'Contoh Artikel Edit: Gizi Seimbang untuk Balita 1-3 Tahun';
-    $formKategori = 'Gizi Baik';
-    $formStatus   = 'Terbit';
-    $formKonten   = "Ini adalah contoh konten artikel.\n\nNanti isi dari database.";
-}
+$error   = '';
+$success = '';
 
 // opsi kategori dan status
 $kategoriOpt = [
@@ -42,9 +49,82 @@ $kategoriOpt = [
 
 $statusOpt = ['Draft', 'Terbit'];
 
-// Placeholder pesan (nanti bisa diisi setelah proses POST)
-$error   = $error   ?? '';
-$success = $success ?? '';
+/* ========== AMBIL DATA JIKA EDIT (GET) ========== */
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && $isEdit && $artikelId) {
+    $stmt = $mysqli->prepare("SELECT judul, kategori, status, konten FROM artikels WHERE id = ? AND penulis_id = ? LIMIT 1");
+    $stmt->bind_param('ii', $artikelId, $userId);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    if ($row = $res->fetch_assoc()) {
+        $formJudul    = $row['judul'] ?? '';
+        $formKategori = $row['kategori'] ?? '';
+        $formStatus   = $row['status'] ?? 'Draft';
+        $formKonten   = $row['konten'] ?? '';
+    } else {
+        $error = 'Artikel tidak ditemukan atau Anda tidak berhak mengedit artikel ini.';
+        $isEdit = false;
+    }
+    $stmt->close();
+}
+
+/* ========== PROSES SIMPAN (POST) ========== */
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $judul    = trim($_POST['judul'] ?? '');
+    $kategori = trim($_POST['kategori'] ?? '');
+    $status   = trim($_POST['status'] ?? 'Draft');
+    $konten   = trim($_POST['konten'] ?? '');
+    $action   = $_POST['action'] ?? 'draft';   // draft / publish
+
+    // untuk isi kembali form kalau error
+    $formJudul    = $judul;
+    $formKategori = $kategori;
+    $formStatus   = $status;
+    $formKonten   = $konten;
+
+    if ($judul === '' || $kategori === '' || $konten === '') {
+        $error = 'Judul, kategori, dan konten wajib diisi.';
+    } elseif (!in_array($kategori, $kategoriOpt, true)) {
+        $error = 'Kategori tidak valid.';
+    } elseif (!in_array($status, $statusOpt, true)) {
+        $error = 'Status tidak valid.';
+    } else {
+        // kalau tombol "Simpan sebagai Draft" dipakai, paksa status jadi Draft
+        $finalStatus = ($action === 'draft') ? 'Draft' : $status;
+
+        if ($isEdit && $artikelId) {
+            // UPDATE
+            $stmt = $mysqli->prepare("
+                UPDATE artikels
+                SET judul = ?, kategori = ?, status = ?, konten = ?
+                WHERE id = ? AND penulis_id = ?
+            ");
+            $stmt->bind_param('ssssii', $judul, $kategori, $finalStatus, $konten, $artikelId, $userId);
+            if ($stmt->execute()) {
+                $stmt->close();
+                header('Location: ' . BASE_URL . '/nakes/artikel_manage.php?msg=updated');
+                exit;
+            } else {
+                $error = 'Gagal memperbarui artikel. Coba lagi.';
+            }
+            $stmt->close();
+        } else {
+            // INSERT BARU
+            $stmt = $mysqli->prepare("
+                INSERT INTO artikels (judul, kategori, status, konten, penulis_id, created_at)
+                VALUES (?, ?, ?, ?, ?, NOW())
+            ");
+            $stmt->bind_param('ssssi', $judul, $kategori, $finalStatus, $konten, $userId);
+            if ($stmt->execute()) {
+                $stmt->close();
+                header('Location: ' . BASE_URL . '/nakes/artikel_manage.php?msg=created');
+                exit;
+            } else {
+                $error = 'Gagal menyimpan artikel. Coba lagi.';
+            }
+            $stmt->close();
+        }
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -89,7 +169,6 @@ $success = $success ?? '';
       border-bottom: 2px solid #ffffffcc;
     }
 
-    /* ✅ Dropdown tidak putih lagi, ikut tema navbar */
     .navbar-nakes .dropdown-menu {
       background: linear-gradient(120deg, #0b5ed7cc, #0f9d58cc) !important;
       border-radius: 0.75rem;
@@ -129,28 +208,16 @@ $success = $success ?? '';
       background: #ffffff;
     }
 
-    .table thead th {
-      font-size: .8rem;
-      text-transform: uppercase;
-      letter-spacing: .05em;
-      color: #6c757d;
-      border-bottom-width: 1px;
-    }
-    .table td {
-      vertical-align: middle;
-      font-size: .86rem;
-    }
-    .badge-status {
-      font-size: .75rem;
-      padding: .25rem .6rem;
-      border-radius: 999px;
-    }
-
     footer {
       flex-shrink: 0;
       background: linear-gradient(120deg, #0b3a60, #0b7542);
       color: #e2f6fa;
       font-size: .85rem;
+    }
+
+    textarea.form-control {
+      min-height: 220px;
+      font-size: .9rem;
     }
   </style>
 </head>
@@ -266,7 +333,7 @@ $success = $success ?? '';
             <?php endif; ?>
 
             <form method="post">
-              <?php if ($isEdit): ?>
+              <?php if ($isEdit && $artikelId): ?>
                 <input type="hidden" name="id" value="<?= (int)$artikelId; ?>">
               <?php endif; ?>
 
@@ -331,7 +398,6 @@ $success = $success ?? '';
                 ><?= htmlspecialchars($formKonten); ?></textarea>
               </div>
 
-              <!-- Catatan kecil -->
               <div class="alert alert-info small">
                 <i class="bi bi-info-circle me-1"></i>
                 Gunakan bahasa yang sederhana dan ramah, hindari istilah medis yang terlalu teknis tanpa penjelasan.
