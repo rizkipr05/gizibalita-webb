@@ -22,7 +22,7 @@ $userEmail = $userEmail ?? '-';
 <html lang="id">
 <head>
   <meta charset="UTF-8">
-  <title>Profil Akun - Gizi Balita</title>
+  <title>Profil Akun</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
   <!-- Bootstrap -->
@@ -77,7 +77,7 @@ $userEmail = $userEmail ?? '-';
 <nav class="navbar navbar-expand-lg navbar-custom shadow-sm">
   <div class="container-fluid px-4 px-md-5">
     <a class="navbar-brand fw-bold" href="<?= BASE_URL ?>/ortu/dashboard.php">
-      <i class="bi bi-heart-pulse-fill me-2"></i> GiziBalita | Orang Tua
+      <i class="bi bi-heart-pulse-fill me-2"></i> GiziBalita
     </a>
 
     <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse" data-bs-target="#navbarOrtu">

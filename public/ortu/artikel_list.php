@@ -88,7 +88,7 @@ $kategoriOpt = [
 <html lang="id">
 <head>
   <meta charset="UTF-8">
-  <title>Artikel Edukasi Gizi - Orang Tua</title>
+  <title>Artikel Edukasi Gizi</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
   <!-- Bootstrap -->

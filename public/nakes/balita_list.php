@@ -1,41 +1,86 @@
 <?php
 require_once __DIR__ . '/../../config/config.php';
 require_once __DIR__ . '/../../includes/auth.php';
+require_once __DIR__ . '/../../includes/db.php';
 require_nakes();
 
-// TODO: nanti ganti dummy ini dengan SELECT dari tabel `balitas`
-$balitaList = [
-    [
-        'id'          => 1,
-        'nama'        => 'Aisyah Putri',
-        'nik'         => '3276011234560001',
-        'tgl_lahir'   => '2023-03-10',
-        'jk'          => 'P',
-        'ortu'        => 'Siti Rahma',
-        'desa'        => 'Sukarame',
-    ],
-    [
-        'id'          => 2,
-        'nama'        => 'Raka Dwi Pratama',
-        'nik'         => '3276011234560002',
-        'tgl_lahir'   => '2022-11-05',
-        'jk'          => 'L',
-        'ortu'        => 'Budi Santoso',
-        'desa'        => 'Way Halim',
-    ],
-    [
-        'id'          => 3,
-        'nama'        => 'Nadia Salsabila',
-        'nik'         => '3276011234560003',
-        'tgl_lahir'   => '2022-07-22',
-        'jk'          => 'P',
-        'ortu'        => 'Dina Lestari',
-        'desa'        => 'Labuhan Ratu',
-    ],
-];
-
+/**
+ * Helper label jenis kelamin
+ */
 function jkLabel($jk) {
     return $jk === 'L' ? 'Laki-laki' : 'Perempuan';
+}
+
+// Ambil filter dari query string
+$q    = trim($_GET['q']   ?? '');
+$jk   = trim($_GET['jk']  ?? '');
+$ortu = trim($_GET['desa'] ?? ''); // pakai field ini sebagai filter nama orang tua
+
+// Build query dari tabel balitas + join users (ortu)
+$sql = "
+  SELECT 
+    b.id,
+    b.nama_balita,
+    b.tanggal_lahir,
+    b.jenis_kelamin,
+    b.berat_lahir,
+    b.tinggi_lahir,
+    u.name  AS nama_ortu,
+    u.email AS email_ortu
+  FROM balitas b
+  LEFT JOIN users u ON u.id = b.user_ortu_id
+  WHERE 1=1
+";
+
+$params = [];
+$types  = "";
+
+// Filter: q (nama balita / nama ortu / email ortu)
+if ($q !== '') {
+    $sql .= " AND (
+                b.nama_balita LIKE ?
+                OR u.name LIKE ?
+                OR u.email LIKE ?
+             )";
+    $like = '%'.$q.'%';
+    $params[] = $like;
+    $params[] = $like;
+    $params[] = $like;
+    $types   .= "sss";
+}
+
+// Filter: jenis kelamin
+if ($jk === 'L' || $jk === 'P') {
+    $sql     .= " AND b.jenis_kelamin = ?";
+    $params[] = $jk;
+    $types   .= "s";
+}
+
+// Filter tambahan berdasarkan nama orang tua (pakai input 'desa' di form)
+if ($ortu !== '') {
+    $sql     .= " AND u.name LIKE ?";
+    $params[] = '%'.$ortu.'%';
+    $types   .= "s";
+}
+
+// Urutkan berdasarkan nama balita
+$sql .= " ORDER BY b.nama_balita ASC";
+
+// Eksekusi query
+$balitaList = [];
+try {
+    $stmt = $mysqli->prepare($sql);
+    if ($params) {
+        $stmt->bind_param($types, ...$params);
+    }
+    $stmt->execute();
+    $res = $stmt->get_result();
+    while ($row = $res->fetch_assoc()) {
+        $balitaList[] = $row;
+    }
+    $stmt->close();
+} catch (Throwable $e) {
+    $loadError = "Gagal memuat data balita: " . $e->getMessage();
 }
 ?>
 <!DOCTYPE html>
@@ -81,7 +126,6 @@ function jkLabel($jk) {
       border-bottom: 2px solid #ffffffcc;
     }
 
-    /* ✅ Dropdown tidak putih lagi, ikut tema navbar */
     .navbar-nakes .dropdown-menu {
       background: linear-gradient(120deg, #0b5ed7cc, #0f9d58cc) !important;
       border-radius: 0.75rem;
@@ -131,11 +175,6 @@ function jkLabel($jk) {
     .table td {
       vertical-align: middle;
       font-size: .86rem;
-    }
-    .badge-status {
-      font-size: .75rem;
-      padding: .25rem .6rem;
-      border-radius: 999px;
     }
 
     footer {
@@ -235,20 +274,27 @@ function jkLabel($jk) {
       </div>
     </div>
 
+    <?php if (!empty($loadError)): ?>
+      <div class="alert alert-danger small py-2">
+        <i class="bi bi-exclamation-triangle me-1"></i>
+        <?= htmlspecialchars($loadError) ?>
+      </div>
+    <?php endif; ?>
+
     <!-- Filter / Pencarian -->
     <div class="card card-soft mb-4">
       <div class="card-body">
         <form method="get" class="row g-2 align-items-end">
           <div class="col-md-4">
-            <label class="form-label small text-muted mb-1">Cari Balita</label>
+            <label class="form-label small text-muted mb-1">Cari Balita / Ortu</label>
             <div class="input-group input-group-sm">
               <span class="input-group-text"><i class="bi bi-search"></i></span>
               <input
                 type="text"
                 name="q"
                 class="form-control"
-                placeholder="Nama balita / NIK / Nama orang tua..."
-                value="<?= htmlspecialchars($_GET['q'] ?? '') ?>"
+                placeholder="Nama balita / nama orang tua / email..."
+                value="<?= htmlspecialchars($q) ?>"
               >
             </div>
           </div>
@@ -256,19 +302,15 @@ function jkLabel($jk) {
             <label class="form-label small text-muted mb-1">Jenis Kelamin</label>
             <select name="jk" class="form-select form-select-sm">
               <option value="">Semua</option>
-              <option value="L" <?= (($_GET['jk'] ?? '') === 'L') ? 'selected' : '' ?>>Laki-laki</option>
-              <option value="P" <?= (($_GET['jk'] ?? '') === 'P') ? 'selected' : '' ?>>Perempuan</option>
+              <option value="L" <?= ($jk === 'L') ? 'selected' : '' ?>>Laki-laki</option>
+              <option value="P" <?= ($jk === 'P') ? 'selected' : '' ?>>Perempuan</option>
             </select>
           </div>
           <div class="col-md-3">
-            <label class="form-label small text-muted mb-1">Desa/Kelurahan</label>
+            <label class="form-label small text-muted mb-1">Nama Orang Tua (opsional)</label>
             <input
               type="text"
-              name="desa"
-              class="form-control form-control-sm"
-              placeholder="Nama desa/kelurahan"
-              value="<?= htmlspecialchars($_GET['desa'] ?? '') ?>"
-            >
+              name="desa" <!-- pakai nama ini untuk filter nama ortu -->
           </div>
           <div class="col-md-2 text-md-end">
             <button type="submit" class="btn btn-success btn-sm me-1">
@@ -303,11 +345,11 @@ function jkLabel($jk) {
                 <tr>
                   <th style="width:5%;">#</th>
                   <th>Nama Balita</th>
-                  <th>NIK</th>
                   <th>Tgl Lahir</th>
                   <th>Jenis Kelamin</th>
                   <th>Orang Tua</th>
-                  <th>Desa/Kelurahan</th>
+                  <th>Berat Lahir (kg)</th>
+                  <th>Tinggi Lahir (cm)</th>
                   <th style="width:14%;">Aksi</th>
                 </tr>
               </thead>
@@ -316,12 +358,17 @@ function jkLabel($jk) {
                 <?php foreach ($balitaList as $b): ?>
                   <tr>
                     <td><?= $no++; ?></td>
-                    <td><?= htmlspecialchars($b['nama']); ?></td>
-                    <td><?= htmlspecialchars($b['nik']); ?></td>
-                    <td><?= htmlspecialchars($b['tgl_lahir']); ?></td>
-                    <td><?= htmlspecialchars(jkLabel($b['jk'])); ?></td>
-                    <td><?= htmlspecialchars($b['ortu']); ?></td>
-                    <td><?= htmlspecialchars($b['desa']); ?></td>
+                    <td><?= htmlspecialchars($b['nama_balita']); ?></td>
+                    <td><?= htmlspecialchars($b['tanggal_lahir']); ?></td>
+                    <td><?= htmlspecialchars(jkLabel($b['jenis_kelamin'])); ?></td>
+                    <td>
+                      <?= htmlspecialchars($b['nama_ortu'] ?? '-'); ?>
+                      <?php if (!empty($b['email_ortu'])): ?>
+                        <small class="text-muted d-block"><?= htmlspecialchars($b['email_ortu']); ?></small>
+                      <?php endif; ?>
+                    </td>
+                    <td><?= $b['berat_lahir']  !== null ? htmlspecialchars($b['berat_lahir'])  : '-'; ?></td>
+                    <td><?= $b['tinggi_lahir'] !== null ? htmlspecialchars($b['tinggi_lahir']) : '-'; ?></td>
                     <td>
                       <div class="btn-group btn-group-sm" role="group">
                         <a

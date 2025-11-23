@@ -1,18 +1,96 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../config/config.php';
+require_once __DIR__ . '/../../includes/db.php';
 require_ortu();
 
-// TODO: ganti dummy data ini dengan data dari tabel `pemeriksaans` untuk balita milik orang tua
-$umurBulan   = [12, 14, 16, 18, 20, 22, 24];
-$beratBadan  = [8.5, 8.9, 9.3, 9.8, 10.2, 10.8, 11.5];
-$tinggiBadan = [72, 74, 76, 78, 80, 83, 85];
+/* ==========================================================
+   1) Ambil balita milik orang tua
+   ========================================================== */
+$ortuId = $_SESSION["user_id"] ?? 0;
+
+$balita = null;
+$balitaId = 0;
+
+$stmt = $mysqli->prepare("
+    SELECT id, nama_balita, tanggal_lahir, jenis_kelamin
+    FROM balitas
+    WHERE user_ortu_id = ?
+    LIMIT 1
+");
+$stmt->bind_param("i", $ortuId);
+$stmt->execute();
+$res = $stmt->get_result();
+
+if ($res && ($row = $res->fetch_assoc())) {
+    $balita = $row;
+    $balitaId = (int)$row['id'];
+}
+$stmt->close();
+
+/* ==========================================================
+   2) Ambil grafik perkembangan + status gizi terbaru
+   ========================================================== */
+$umurBulan   = [];
+$beratBadan  = [];
+$tinggiBadan = [];
+
+$status_gizi = "-";
+$tgl_terakhir = null;
+
+if ($balitaId > 0) {
+
+    // Status gizi terakhir
+    $stmt = $mysqli->prepare("
+        SELECT status_gizi, tanggal_pemeriksaan
+        FROM pemeriksaans
+        WHERE balita_id = ?
+        ORDER BY tanggal_pemeriksaan DESC
+        LIMIT 1
+    ");
+    $stmt->bind_param("i", $balitaId);
+    $stmt->execute();
+    $res = $stmt->get_result();
+
+    if ($res && ($row = $res->fetch_assoc())) {
+        $status_gizi  = $row['status_gizi'];
+        $tgl_terakhir = $row['tanggal_pemeriksaan'];
+    }
+    $stmt->close();
+
+    // Data grafik
+    $stmt = $mysqli->prepare("
+        SELECT umur_bulan, berat_badan, tinggi_badan
+        FROM pemeriksaans
+        WHERE balita_id = ?
+        ORDER BY tanggal_pemeriksaan ASC
+    ");
+    $stmt->bind_param("i", $balitaId);
+    $stmt->execute();
+    $res = $stmt->get_result();
+
+    while ($row = $res->fetch_assoc()) {
+        $umurBulan[]   = (int)$row['umur_bulan'];
+        $beratBadan[]  = (float)$row['berat_badan'];
+        $tinggiBadan[] = (float)$row['tinggi_badan'];
+    }
+    $stmt->close();
+}
+
+/* ==========================================================
+   3) Dummy jika belum ada data
+   ========================================================== */
+if (empty($umurBulan)) {
+    $umurBulan   = [12, 14, 16, 18, 20, 22, 24];
+    $beratBadan  = [8.5, 8.9, 9.3, 9.8, 10.2, 10.8, 11.5];
+    $tinggiBadan = [72, 74, 76, 78, 80, 83, 85];
+}
 ?>
 <!DOCTYPE html>
 <html lang="id">
 <head>
   <meta charset="UTF-8">
-  <title>Grafik Perkembangan - Gizi Balita</title>
+  <title>Grafik Perkembangan</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
   <!-- Bootstrap -->
@@ -20,7 +98,7 @@ $tinggiBadan = [72, 74, 76, 78, 80, 83, 85];
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
 
   <style>
-    :root {
+     :root {
       --brand-main: #0f9d58;
       --brand-soft: #e0f7ec;
       --brand-dark: #0b7542;
@@ -33,7 +111,6 @@ $tinggiBadan = [72, 74, 76, 78, 80, 83, 85];
       background: radial-gradient(circle at top left, #f1fff7 0, #f8fffb 40%, #ffffff 100%);
     }
 
-    /* NAVBAR */
     .navbar-custom {
       background: linear-gradient(120deg, var(--brand-main), #34c785);
     }
@@ -42,32 +119,11 @@ $tinggiBadan = [72, 74, 76, 78, 80, 83, 85];
     .navbar-custom .dropdown-item {
       color: #fdfdfd !important;
     }
-    .navbar-custom .nav-link {
-      opacity: .85;
-    }
-    .navbar-custom .nav-link:hover {
-      opacity: 1;
-    }
     .navbar-custom .nav-link.active {
       font-weight: 600;
       border-bottom: 2px solid #ffffffcc;
     }
-    .navbar-custom .dropdown-menu {
-      background: #ffffff;
-      border-radius: .75rem;
-      border: none;
-      box-shadow: 0 12px 30px rgba(0,0,0,0.1);
-      padding-top: .5rem;
-      padding-bottom: .5rem;
-    }
-    .navbar-custom .dropdown-item {
-      color: #444 !important;
-    }
-    .navbar-custom .dropdown-item.text-danger {
-      color: #dc3545 !important;
-    }
 
-    /* MAIN */
     .page-wrapper {
       flex: 1 0 auto;
       padding: 32px 0 40px;
@@ -78,31 +134,39 @@ $tinggiBadan = [72, 74, 76, 78, 80, 83, 85];
       box-shadow: 0 16px 35px rgba(0,0,0,0.06);
       background: #ffffff;
     }
+    .badge-status {
+      font-size: .95rem;
+      padding: .4rem .85rem;
+      border-radius: 999px;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: .35rem .75rem;
+      background-color: #f3faf6;
+      font-size: .8rem;
+      color: #3d6653;
+      border: 1px solid #e0f2ea;
+    }
+    .bg-orange { background-color: #ffb347; color:#212529; }
 
-    /* FOOTER */
     footer {
       flex-shrink: 0;
       background: linear-gradient(120deg, #0b4125, #0b7542);
       color: #e2f6ea;
-      font-size: .85rem;
-    }
-    footer a {
-      color: #b8f3d1;
-      text-decoration: none;
-    }
-    footer a:hover {
-      text-decoration: underline;
     }
   </style>
 </head>
 <body>
+
 
 <!-- =============== NAVBAR =============== -->
 <nav class="navbar navbar-expand-lg navbar-custom shadow-sm">
   <div class="container-fluid px-4 px-md-5">
     <a class="navbar-brand fw-bold d-flex align-items-center" href="<?= BASE_URL ?>/ortu/dashboard.php">
       <i class="bi bi-heart-pulse-fill me-2"></i>
-      <span>GiziBalita | Orang Tua</span>
+      <span>GiziBalita</span>
     </a>
 
     <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse" data-bs-target="#navbarOrtu">
@@ -167,130 +231,90 @@ $tinggiBadan = [72, 74, 76, 78, 80, 83, 85];
 <!-- ============ END NAVBAR ============ -->
 
 
-<!-- =============== MAIN CONTENT =============== -->
 <div class="page-wrapper">
   <div class="container-fluid px-4 px-md-5">
 
-    <div class="row mb-3">
-      <div class="col-12">
-        <h4 class="mb-1">Grafik Perkembangan Balita</h4>
-        <p class="text-muted mb-0">
-          Pantau perubahan berat badan dan tinggi badan balita berdasarkan umur dalam bulan.
-        </p>
-      </div>
-    </div>
+    <h4 class="mb-1">Grafik Perkembangan Balita</h4>
+    <p class="text-muted">
+      Pantau perubahan berat dan tinggi badan seiring pertambahan umur.
+    </p>
 
-    <div class="row g-4">
-      <!-- Grafik BB/U -->
+    <h5>
+      Status Gizi Terakhir: 
+      <strong class="text-primary"><?= htmlspecialchars($status_gizi) ?></strong>
+
+      <?php if ($tgl_terakhir): ?>
+        <span class="text-muted small">(<?= date('d-m-Y', strtotime($tgl_terakhir)); ?>)</span>
+      <?php endif; ?>
+    </h5>
+
+    <div class="row g-4 mt-3">
+
       <div class="col-md-6">
-        <div class="card card-soft h-100">
+        <div class="card card-soft">
           <div class="card-body">
-            <h6 class="text-uppercase text-muted mb-3">Berat Badan per Umur (BB/U)</h6>
-            <canvas id="chartBBU" height="220"></canvas>
-            <p class="small text-muted mt-3 mb-0">
-              Garis ini menunjukkan perkembangan berat badan balita dari waktu ke waktu. 
-              Konsultasikan ke tenaga kesehatan bila berat badan tidak bertambah sesuai usia.
-            </p>
+            <h6 class="text-uppercase text-muted">Berat Badan / Umur</h6>
+            <canvas id="chartBBU"></canvas>
           </div>
         </div>
       </div>
 
-      <!-- Grafik TB/U -->
       <div class="col-md-6">
-        <div class="card card-soft h-100">
+        <div class="card card-soft">
           <div class="card-body">
-            <h6 class="text-uppercase text-muted mb-3">Tinggi Badan per Umur (TB/U)</h6>
-            <canvas id="chartTBU" height="220"></canvas>
-            <p class="small text-muted mt-3 mb-0">
-              Tinggi badan membantu memantau kemungkinan stunting. 
-              Pastikan balita mendapatkan asupan gizi dan stimulasi yang cukup.
-            </p>
+            <h6 class="text-uppercase text-muted">Tinggi Badan / Umur</h6>
+            <canvas id="chartTBU"></canvas>
           </div>
         </div>
       </div>
-    </div>
 
+    </div>
   </div>
 </div>
-<!-- ============ END MAIN CONTENT ============ -->
 
-
-<!-- =============== FOOTER =============== -->
+<!-- ================== FOOTER FULL ================= -->
 <footer>
-  <div class="container-fluid px-4 px-md-5 py-3">
-    <div class="d-md-flex justify-content-between align-items-center">
-      <div class="mb-2 mb-md-0">
-        &copy; <?= date('Y') ?> <strong>GiziBalita</strong>. Semua hak dilindungi.
-      </div>
-      <div class="text-md-end">
-        <span class="me-2">Gunakan grafik ini untuk memantau pertumbuhan balita secara berkala.</span>
-      </div>
-    </div>
+  <div class="container py-3 text-center">
+    © <?= date("Y") ?> GiziBalita — Sistem Monitoring Gizi Balita
   </div>
 </footer>
-<!-- ============ END FOOTER ============ -->
 
-
-<!-- SCRIPTS -->
+<!-- JS -->
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <script>
-  const umurLabels   = <?= json_encode($umurBulan) ?>;
-  const dataBB       = <?= json_encode($beratBadan) ?>;
-  const dataTB       = <?= json_encode($tinggiBadan) ?>;
+const umurLabels = <?= json_encode($umurBulan) ?>;
+const dataBB     = <?= json_encode($beratBadan) ?>;
+const dataTB     = <?= json_encode($tinggiBadan) ?>;
 
-  const ctxBB = document.getElementById('chartBBU').getContext('2d');
-  new Chart(ctxBB, {
-    type: 'line',
-    data: {
-      labels: umurLabels,
-      datasets: [{
-        label: 'Berat Badan (kg)',
-        data: dataBB,
-        borderWidth: 2,
-        tension: 0.3,
-        pointRadius: 3
-      }]
-    },
-    options: {
-      plugins: { legend: { display: true } },
-      scales: {
-        x: {
-          title: { display: true, text: 'Umur (bulan)' }
-        },
-        y: {
-          title: { display: true, text: 'Berat Badan (kg)' }
-        }
-      }
-    }
-  });
+new Chart(document.getElementById('chartBBU'), {
+  type: 'line',
+  data: {
+    labels: umurLabels,
+    datasets: [{
+      label: 'Berat (kg)',
+      data: dataBB,
+      borderColor: '#0f9d58',
+      borderWidth: 2,
+      tension: 0.3
+    }]
+  }
+});
 
-  const ctxTB = document.getElementById('chartTBU').getContext('2d');
-  new Chart(ctxTB, {
-    type: 'line',
-    data: {
-      labels: umurLabels,
-      datasets: [{
-        label: 'Tinggi Badan (cm)',
-        data: dataTB,
-        borderWidth: 2,
-        tension: 0.3,
-        pointRadius: 3
-      }]
-    },
-    options: {
-      plugins: { legend: { display: true } },
-      scales: {
-        x: {
-          title: { display: true, text: 'Umur (bulan)' }
-        },
-        y: {
-          title: { display: true, text: 'Tinggi Badan (cm)' }
-        }
-      }
-    }
-  });
+new Chart(document.getElementById('chartTBU'), {
+  type: 'line',
+  data: {
+    labels: umurLabels,
+    datasets: [{
+      label: 'Tinggi (cm)',
+      data: dataTB,
+      borderColor: '#0b5ed7',
+      borderWidth: 2,
+      tension: 0.3
+    }]
+  }
+});
 </script>
 
 </body>

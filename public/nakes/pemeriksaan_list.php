@@ -1,42 +1,12 @@
 <?php
 require_once __DIR__ . '/../../config/config.php';
 require_once __DIR__ . '/../../includes/auth.php';
+require_once __DIR__ . '/../../includes/db.php';
 require_nakes();
 
-// TODO: nanti ganti dummy ini dengan SELECT dari tabel `pemeriksaans` JOIN `balitas` & `users`
-$pemeriksaanList = [
-    [
-        'id'           => 1,
-        'tanggal'      => '2025-03-10',
-        'nama_balita'  => 'Aisyah Putri',
-        'umur_bulan'   => 24,
-        'bb'           => 11.5,
-        'tb'           => 85.0,
-        'status_gizi'  => 'Gizi Baik',
-        'nakes'        => 'drg. Rina',
-    ],
-    [
-        'id'           => 2,
-        'tanggal'      => '2025-03-09',
-        'nama_balita'  => 'Raka Dwi Pratama',
-        'umur_bulan'   => 20,
-        'bb'           => 10.1,
-        'tb'           => 81.0,
-        'status_gizi'  => 'Gizi Kurang',
-        'nakes'        => 'dr. Budi',
-    ],
-    [
-        'id'           => 3,
-        'tanggal'      => '2025-03-08',
-        'nama_balita'  => 'Nadia Salsabila',
-        'umur_bulan'   => 18,
-        'bb'           => 9.7,
-        'tb'           => 79.0,
-        'status_gizi'  => 'Risiko Gizi Lebih',
-        'nakes'        => 'drg. Rina',
-    ],
-];
-
+/**
+ * Helper untuk class badge status gizi
+ */
 function badgeClassNakes($status) {
     switch ($status) {
         case 'Gizi Baik':
@@ -52,6 +22,101 @@ function badgeClassNakes($status) {
         default:
             return 'bg-secondary';
     }
+}
+
+/* ================== AMBIL FILTER DARI GET ================== */
+$q         = trim($_GET['q'] ?? '');
+$tgl_awal  = trim($_GET['tgl_awal'] ?? '');
+$tgl_akhir = trim($_GET['tgl_akhir'] ?? '');
+$statusQ   = trim($_GET['status'] ?? '');
+
+/* ================== AMBIL DATA PEMERIKSAAN DARI DB ================== */
+$pemeriksaanList = [];
+$listError       = '';
+
+try {
+    // Base query
+    $sql = "
+        SELECT 
+            p.id,
+            DATE(p.tanggal_pemeriksaan) AS tanggal,
+            p.umur_bulan,
+            p.berat_badan AS bb,
+            p.tinggi_badan AS tb,
+            p.status_gizi,
+            b.nama_balita,
+            n.name AS nakes,
+            o.name AS nama_ortu
+        FROM pemeriksaans p
+        JOIN balitas b ON b.id = p.balita_id
+        LEFT JOIN users n ON n.id = p.nakes_id
+        LEFT JOIN users o ON o.id = b.user_ortu_id
+        WHERE 1=1
+    ";
+
+    $params = [];
+    $types  = '';
+
+    // Filter nama balita / ortu
+    if ($q !== '') {
+        $sql     .= " AND (b.nama_balita LIKE ? OR o.name LIKE ?)";
+        $likeQ    = '%' . $q . '%';
+        $params[] = $likeQ;
+        $params[] = $likeQ;
+        $types   .= 'ss';
+    }
+
+    // Filter periode tanggal
+    if ($tgl_awal !== '') {
+        $sql     .= " AND DATE(p.tanggal_pemeriksaan) >= ?";
+        $params[] = $tgl_awal;
+        $types   .= 's';
+    }
+    if ($tgl_akhir !== '') {
+        $sql     .= " AND DATE(p.tanggal_pemeriksaan) <= ?";
+        $params[] = $tgl_akhir;
+        $types   .= 's';
+    }
+
+    // Filter status gizi
+    if ($statusQ !== '') {
+        $sql     .= " AND p.status_gizi = ?";
+        $params[] = $statusQ;
+        $types   .= 's';
+    }
+
+    // Urutkan dari yang terbaru
+    $sql .= " ORDER BY p.tanggal_pemeriksaan DESC, p.id DESC";
+
+    // Siapkan statement
+    if ($stmt = $mysqli->prepare($sql)) {
+        if (!empty($params)) {
+            $stmt->bind_param($types, ...$params);
+        }
+
+        $stmt->execute();
+        $res = $stmt->get_result();
+
+        while ($row = $res->fetch_assoc()) {
+            $pemeriksaanList[] = [
+                'id'          => (int)$row['id'],
+                'tanggal'     => $row['tanggal'],
+                'nama_balita' => $row['nama_balita'],
+                'umur_bulan'  => (int)$row['umur_bulan'],
+                'bb'          => (float)$row['bb'],
+                'tb'          => (float)$row['tb'],
+                'status_gizi' => $row['status_gizi'],
+                'nakes'       => $row['nakes'] ?? 'Nakes',
+                'nama_ortu'   => $row['nama_ortu'] ?? null,
+            ];
+        }
+
+        $stmt->close();
+    } else {
+        $listError = "Gagal menyiapkan query: " . $mysqli->error;
+    }
+} catch (Throwable $e) {
+    $listError = "Gagal memuat data pemeriksaan: " . $e->getMessage();
 }
 ?>
 <!DOCTYPE html>
@@ -97,7 +162,7 @@ function badgeClassNakes($status) {
       border-bottom: 2px solid #ffffffcc;
     }
 
-    /* ✅ Dropdown tidak putih lagi, ikut tema navbar */
+    /* Dropdown ikut tema navbar */
     .navbar-nakes .dropdown-menu {
       background: linear-gradient(120deg, #0b5ed7cc, #0f9d58cc) !important;
       border-radius: 0.75rem;
@@ -200,7 +265,7 @@ function badgeClassNakes($status) {
         </li>
 
         <li class="nav-item dropdown ms-lg-3">
-          <a class="nav-link dropdown-toggle d-flex align-items-center" href="<?=  BASE_URL ?>/nakes/profile.php" data-bs-toggle="dropdown">
+          <a class="nav-link dropdown-toggle d-flex align-items-center" href="#" data-bs-toggle="dropdown">
             <div class="rounded-circle bg-white bg-opacity-25 d-flex align-items-center justify-content-center me-2" style="width:32px;height:32px;">
               <i class="bi bi-person-badge-fill"></i>
             </div>
@@ -251,6 +316,28 @@ function badgeClassNakes($status) {
       </div>
     </div>
 
+    <!-- Pesan sukses / error dari delete -->
+    <?php if (!empty($_GET['msg'])): ?>
+      <div class="alert alert-success py-2 small">
+        <i class="bi bi-check-circle me-1"></i>
+        <?= htmlspecialchars($_GET['msg']) ?>
+      </div>
+    <?php endif; ?>
+
+    <?php if (!empty($_GET['err'])): ?>
+      <div class="alert alert-danger py-2 small">
+        <i class="bi bi-exclamation-triangle me-1"></i>
+        <?= htmlspecialchars($_GET['err']) ?>
+      </div>
+    <?php endif; ?>
+
+    <?php if ($listError): ?>
+      <div class="alert alert-danger py-2 small">
+        <i class="bi bi-exclamation-triangle me-1"></i>
+        <?= htmlspecialchars($listError) ?>
+      </div>
+    <?php endif; ?>
+
     <!-- Filter / Pencarian -->
     <div class="card card-soft mb-4">
       <div class="card-body">
@@ -264,7 +351,7 @@ function badgeClassNakes($status) {
                 name="q"
                 class="form-control"
                 placeholder="Cari nama balita / orang tua..."
-                value="<?= htmlspecialchars($_GET['q'] ?? '') ?>"
+                value="<?= htmlspecialchars($q) ?>"
               >
             </div>
           </div>
@@ -276,14 +363,14 @@ function badgeClassNakes($status) {
                 type="date"
                 name="tgl_awal"
                 class="form-control form-control-sm"
-                value="<?= htmlspecialchars($_GET['tgl_awal'] ?? '') ?>"
+                value="<?= htmlspecialchars($tgl_awal) ?>"
               >
               <span class="align-self-center small text-muted">s.d</span>
               <input
                 type="date"
                 name="tgl_akhir"
                 class="form-control form-control-sm"
-                value="<?= htmlspecialchars($_GET['tgl_akhir'] ?? '') ?>"
+                value="<?= htmlspecialchars($tgl_akhir) ?>"
               >
             </div>
           </div>
@@ -301,7 +388,6 @@ function badgeClassNakes($status) {
                   'Gizi Lebih',
                   'Obesitas',
               ];
-              $statusQ = $_GET['status'] ?? '';
               foreach ($statusOpt as $s):
               ?>
                 <option value="<?= htmlspecialchars($s) ?>" <?= $statusQ === $s ? 'selected' : '' ?>>
@@ -326,7 +412,7 @@ function badgeClassNakes($status) {
     <!-- Tabel Riwayat Pemeriksaan -->
     <div class="card card-soft">
       <div class="card-body">
-        <?php if (empty($pemeriksaanList)): ?>
+        <?php if (empty($pemeriksaanList) && !$listError): ?>
           <div class="text-center py-5">
             <i class="bi bi-clipboard2-x fs-1 text-muted mb-3"></i>
             <h6 class="mb-1">Belum ada data pemeriksaan</h6>
@@ -350,7 +436,7 @@ function badgeClassNakes($status) {
                   <th>TB (cm)</th>
                   <th>Status Gizi</th>
                   <th>Petugas</th>
-                  <th style="width:14%;">Aksi</th>
+                  <th style="width:18%;">Aksi</th>
                 </tr>
               </thead>
               <tbody>
@@ -359,16 +445,21 @@ function badgeClassNakes($status) {
                   <tr>
                     <td><?= $no++; ?></td>
                     <td><?= htmlspecialchars($p['tanggal']); ?></td>
-                    <td><?= htmlspecialchars($p['nama_balita']); ?></td>
+                    <td>
+                      <?= htmlspecialchars($p['nama_balita']); ?>
+                      <?php if (!empty($p['nama_ortu'])): ?>
+                        <div class="small text-muted">Ortu: <?= htmlspecialchars($p['nama_ortu']); ?></div>
+                      <?php endif; ?>
+                    </td>
                     <td><?= (int)$p['umur_bulan']; ?></td>
-                    <td><?= htmlspecialchars($p['bb']); ?></td>
-                    <td><?= htmlspecialchars($p['tb']); ?></td>
+                    <td><?= htmlspecialchars(number_format($p['bb'], 1)); ?></td>
+                    <td><?= htmlspecialchars(number_format($p['tb'], 1)); ?></td>
                     <td>
                       <span class="badge badge-status <?= badgeClassNakes($p['status_gizi']); ?>">
                         <?= htmlspecialchars($p['status_gizi']); ?>
                       </span>
                     </td>
-                    <td><?= htmlspecialchars($p['nakes']); ?></td>
+                    <td><?= htmlspecialchars($p['nakes'] ?: 'Tenaga Kesehatan'); ?></td>
                     <td>
                       <div class="btn-group btn-group-sm" role="group">
                         <a
@@ -385,6 +476,14 @@ function badgeClassNakes($status) {
                         >
                           <i class="bi bi-printer"></i>
                         </a>
+                        <button
+                          type="button"
+                          class="btn btn-outline-danger"
+                          title="Hapus"
+                          onclick="hapusPemeriksaan(<?= (int)$p['id'] ?>)"
+                        >
+                          <i class="bi bi-trash"></i>
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -416,6 +515,14 @@ function badgeClassNakes($status) {
 </footer>
 <!-- ========= END FOOTER ========= -->
 
+<script>
+function hapusPemeriksaan(id) {
+  if (!confirm("Yakin ingin menghapus pemeriksaan ini?\nData tidak dapat dikembalikan.")) {
+    return;
+  }
+  window.location.href = "<?= BASE_URL ?>/nakes/pemeriksaan_delete.php?id=" + id;
+}
+</script>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 </body>

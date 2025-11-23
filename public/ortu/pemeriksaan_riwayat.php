@@ -1,38 +1,71 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../config/config.php';
+require_once __DIR__ . '/../../includes/db.php';
 require_ortu();
 
-// TODO: ganti dummy data ini dengan data dari tabel `pemeriksaans` untuk balita milik orang tua
-$riwayat = [
-    [
-        'id'            => 1,
-        'tanggal'       => '2025-03-10',
-        'umur_bulan'    => 24,
-        'berat_badan'   => 11.5,
-        'tinggi_badan'  => 85.0,
-        'lingkar_lengan'=> 15.2,
-        'status_gizi'   => 'Gizi Baik',
-    ],
-    [
-        'id'            => 2,
-        'tanggal'       => '2025-02-10',
-        'umur_bulan'    => 23,
-        'berat_badan'   => 11.0,
-        'tinggi_badan'  => 84.0,
-        'lingkar_lengan'=> 14.8,
-        'status_gizi'   => 'Gizi Baik',
-    ],
-    [
-        'id'            => 3,
-        'tanggal'       => '2025-01-10',
-        'umur_bulan'    => 22,
-        'berat_badan'   => 10.6,
-        'tinggi_badan'  => 83.0,
-        'lingkar_lengan'=> 14.5,
-        'status_gizi'   => 'Gizi Kurang',
-    ],
-];
+/**
+ * Catatan:
+ * Di proses login ORTU, pastikan kamu set:
+ *   $_SESSION['user_id'] = <id user dari tabel users>;
+ *   $_SESSION['name']    = <nama orang tua>;
+ *
+ * Di tabel balitas, kolom relasinya adalah:
+ *   balitas.user_ortu_id => mengarah ke users.id (ortu)
+ */
+$ortu_id = $_SESSION['user_id'] ?? 0; // <-- DIBENERIN: sebelumnya $_SESSION['id']
+
+/* ================== AMBIL RIWAYAT PEMERIKSAAN DARI DB ================== */
+
+$riwayat   = [];
+$errorList = "";
+
+if ($ortu_id <= 0) {
+    $errorList = "Sesi login orang tua tidak valid. Silakan login ulang.";
+} else {
+    try {
+        $sql = "
+            SELECT 
+                p.id,
+                DATE(p.tanggal_pemeriksaan) AS tanggal,
+                p.umur_bulan,
+                p.berat_badan,
+                p.tinggi_badan,
+                p.lingkar_lengan,
+                p.status_gizi
+            FROM pemeriksaans p
+            JOIN balitas b ON b.id = p.balita_id
+            WHERE b.user_ortu_id = ?
+            ORDER BY p.tanggal_pemeriksaan DESC, p.id DESC
+        ";
+
+        if ($stmt = $mysqli->prepare($sql)) {
+            $stmt->bind_param("i", $ortu_id);
+            $stmt->execute();
+            $res = $stmt->get_result();
+
+            while ($row = $res->fetch_assoc()) {
+                $riwayat[] = [
+                    'id'             => (int)$row['id'],
+                    'tanggal'        => $row['tanggal'],
+                    'umur_bulan'     => (int)$row['umur_bulan'],
+                    'berat_badan'    => (float)$row['berat_badan'],
+                    'tinggi_badan'   => (float)$row['tinggi_badan'],
+                    'lingkar_lengan' => $row['lingkar_lengan'] !== null ? (float)$row['lingkar_lengan'] : null,
+                    'status_gizi'    => $row['status_gizi'],
+                ];
+            }
+
+            $stmt->close();
+        } else {
+            $errorList = "Gagal menyiapkan query: " . $mysqli->error;
+        }
+    } catch (Throwable $e) {
+        $errorList = "Gagal memuat data pemeriksaan: " . $e->getMessage();
+    }
+}
+
+/* ================== BADGE STATUS GIZI ================== */
 
 function badgeClass($status) {
     switch ($status) {
@@ -55,7 +88,7 @@ function badgeClass($status) {
 <html lang="id">
 <head>
   <meta charset="UTF-8">
-  <title>Riwayat Pemeriksaan - Gizi Balita</title>
+  <title>Riwayat Pemeriksaan</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
   <!-- Bootstrap -->
@@ -165,7 +198,7 @@ function badgeClass($status) {
   <div class="container-fluid px-4 px-md-5">
     <a class="navbar-brand fw-bold d-flex align-items-center" href="<?= BASE_URL ?>/ortu/dashboard.php">
       <i class="bi bi-heart-pulse-fill me-2"></i>
-      <span>GiziBalita | Orang Tua</span>
+      <span>GiziBalita</span>
     </a>
 
     <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse" data-bs-target="#navbarOrtu">
@@ -235,18 +268,35 @@ function badgeClass($status) {
   <div class="container-fluid px-4 px-md-5">
 
     <div class="row mb-3">
-      <div class="col-12">
-        <h4 class="mb-1">Riwayat Pemeriksaan Gizi Balita</h4>
-        <p class="text-muted mb-0">
-          Daftar pemeriksaan yang pernah dilakukan oleh tenaga kesehatan untuk balita Anda.
-        </p>
+      <div class="col-12 d-md-flex justify-content-between align-items-center">
+        <div>
+          <h4 class="mb-1">Riwayat Pemeriksaan Gizi Balita</h4>
+          <p class="text-muted mb-0">
+            Daftar pemeriksaan yang pernah dilakukan oleh tenaga kesehatan untuk balita Anda.
+          </p>
+        </div>
+
+        <?php if (!empty($riwayat)): ?>
+        <div class="mt-3 mt-md-0">
+          <button type="button" class="btn btn-outline-primary btn-sm" onclick="printRiwayat()">
+            <i class="bi bi-printer me-1"></i> Cetak PDF
+          </button>
+        </div>
+        <?php endif; ?>
       </div>
     </div>
+
+    <?php if ($errorList): ?>
+      <div class="alert alert-danger py-2 small">
+        <i class="bi bi-exclamation-triangle me-1"></i>
+        <?= htmlspecialchars($errorList) ?>
+      </div>
+    <?php endif; ?>
 
     <div class="card card-soft">
       <div class="card-body">
 
-        <?php if (empty($riwayat)): ?>
+        <?php if (empty($riwayat) && !$errorList): ?>
           <div class="text-center py-5">
             <i class="bi bi-clipboard-x fs-1 text-muted mb-3"></i>
             <h6 class="mb-1">Belum ada data pemeriksaan</h6>
@@ -255,7 +305,7 @@ function badgeClass($status) {
             </p>
           </div>
         <?php else: ?>
-          <div class="table-responsive">
+          <div id="riwayatTableWrap" class="table-responsive">
             <table class="table align-middle mb-0">
               <thead>
                 <tr>
@@ -266,7 +316,6 @@ function badgeClass($status) {
                   <th>Tinggi (cm)</th>
                   <th>Lingkar Lengan (cm)</th>
                   <th>Status Gizi</th>
-                  <th style="width: 10%;">Aksi</th>
                 </tr>
               </thead>
               <tbody>
@@ -276,24 +325,17 @@ function badgeClass($status) {
                     <td><?= $no++; ?></td>
                     <td><?= htmlspecialchars($row['tanggal']); ?></td>
                     <td><?= (int)$row['umur_bulan']; ?></td>
-                    <td><?= htmlspecialchars($row['berat_badan']); ?></td>
-                    <td><?= htmlspecialchars($row['tinggi_badan']); ?></td>
-                    <td><?= $row['lingkar_lengan'] !== null ? htmlspecialchars($row['lingkar_lengan']) : '-'; ?></td>
+                    <td><?= number_format($row['berat_badan'], 1); ?></td>
+                    <td><?= number_format($row['tinggi_badan'], 1); ?></td>
+                    <td>
+                      <?= $row['lingkar_lengan'] !== null
+                            ? number_format($row['lingkar_lengan'], 1)
+                            : '-'; ?>
+                    </td>
                     <td>
                       <span class="badge badge-status <?= badgeClass($row['status_gizi']); ?>">
                         <?= htmlspecialchars($row['status_gizi']); ?>
                       </span>
-                    </td>
-                    <td>
-                      <!-- TODO: buat halaman detail/cetak jika diperlukan -->
-                      <div class="btn-group btn-group-sm" role="group">
-                        <a href="#" class="btn btn-outline-secondary">
-                          <i class="bi bi-eye"></i>
-                        </a>
-                        <a href="#" class="btn btn-outline-secondary">
-                          <i class="bi bi-printer"></i>
-                        </a>
-                      </div>
                     </td>
                   </tr>
                 <?php endforeach; ?>
@@ -327,5 +369,28 @@ function badgeClass($status) {
 
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+function printRiwayat() {
+  const wrap = document.getElementById('riwayatTableWrap');
+  if (!wrap) return;
+
+  const printContents = wrap.innerHTML;
+  const w = window.open('', '_blank');
+
+  w.document.write('<html><head><title>Cetak Riwayat Gizi</title>');
+  w.document.write('<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">');
+  w.document.write('</head><body>');
+  w.document.write('<div class="container mt-4">');
+  w.document.write('<h4 class="mb-3">Riwayat Pemeriksaan Gizi Balita</h4>');
+  w.document.write(printContents);
+  w.document.write('</div>');
+  w.document.write('</body></html>');
+
+  w.document.close();
+  w.focus();
+  w.print();
+  w.close();
+}
+</script>
 </body>
 </html>

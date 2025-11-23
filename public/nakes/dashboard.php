@@ -1,41 +1,100 @@
 <?php
 require_once __DIR__ . '/../../config/config.php';
 require_once __DIR__ . '/../../includes/auth.php';
+require_once __DIR__ . '/../../includes/db.php'; // ⬅️ WAJIB supaya $mysqli ada
 require_nakes();
 
-// TODO: Nanti ini diambil dari database
-$totalBalita        = 24;
-$totalPemeriksaan   = 120;
-$totalArtikel       = 8;
-$persenGiziBaik     = 72;
+/* ================== STATISTIK DARI DATABASE ================== */
 
-// Dummy riwayat terakhir
-$latest = [
-    [
-        'tanggal'      => '2025-03-10',
-        'nama_balita'  => 'Aisyah Putri',
-        'umur_bulan'   => 24,
-        'bb'           => 11.5,
-        'tb'           => 85,
-        'status_gizi'  => 'Gizi Baik',
-    ],
-    [
-        'tanggal'      => '2025-03-09',
-        'nama_balita'  => 'Raka Dwi',
-        'umur_bulan'   => 20,
-        'bb'           => 10.2,
-        'tb'           => 81,
-        'status_gizi'  => 'Gizi Kurang',
-    ],
-    [
-        'tanggal'      => '2025-03-08',
-        'nama_balita'  => 'Nadia Salsabila',
-        'umur_bulan'   => 18,
-        'bb'           => 9.6,
-        'tb'           => 79,
-        'status_gizi'  => 'Risiko Gizi Lebih',
-    ],
-];
+$totalBalita      = 0;
+$totalPemeriksaan = 0;
+$totalArtikel     = 0;
+$persenGiziBaik   = 0;
+
+// 1) Total Balita → tabel `balitas`
+try {
+    $res = $mysqli->query("SELECT COUNT(*) AS jml FROM balitas");
+    if ($res && ($row = $res->fetch_assoc())) {
+        $totalBalita = (int)$row['jml'];
+    }
+} catch (Throwable $e) {
+    // kalau error, biarkan 0 saja
+}
+
+// 2) Total Pemeriksaan → tabel `pemeriksaans`
+try {
+    $res = $mysqli->query("SELECT COUNT(*) AS jml FROM pemeriksaans");
+    if ($res && ($row = $res->fetch_assoc())) {
+        $totalPemeriksaan = (int)$row['jml'];
+    }
+} catch (Throwable $e) {
+    // biarkan 0 jika error
+}
+
+// 3) Total Artikel Edukasi → tabel `artikels`
+//    Hanya yang status = 'Terbit'
+try {
+    $res = $mysqli->query("SELECT COUNT(*) AS jml FROM artikels WHERE status = 'Terbit'");
+    if ($res && ($row = $res->fetch_assoc())) {
+        $totalArtikel = (int)$row['jml'];
+    }
+} catch (Throwable $e) {
+    // biarkan 0 jika error
+}
+
+// 4) Persen Gizi Baik → dari tabel `pemeriksaans`
+try {
+    $sql = "
+        SELECT
+            SUM(CASE WHEN status_gizi = 'Gizi Baik' THEN 1 ELSE 0 END) AS jml_baik,
+            COUNT(*) AS total
+        FROM pemeriksaans
+    ";
+    $res = $mysqli->query($sql);
+    if ($res && ($row = $res->fetch_assoc())) {
+        $total   = (int)$row['total'];
+        $baik    = (int)$row['jml_baik'];
+        if ($total > 0) {
+            $persenGiziBaik = (int) round(($baik / $total) * 100);
+        }
+    }
+} catch (Throwable $e) {
+    // biarkan 0 kalau error
+}
+
+/* ================== RIWAYAT TERAKHIR (DINAMIS DARI DB) ================== */
+
+$latest = [];
+try {
+    $sql = "
+        SELECT 
+            DATE(p.tanggal_pemeriksaan) AS tanggal,
+            b.nama_balita,
+            p.umur_bulan,
+            p.berat_badan AS bb,
+            p.tinggi_badan AS tb,
+            p.status_gizi
+        FROM pemeriksaans p
+        JOIN balitas b ON b.id = p.balita_id
+        ORDER BY p.tanggal_pemeriksaan DESC, p.id DESC
+        LIMIT 5
+    ";
+    $res = $mysqli->query($sql);
+    if ($res) {
+        while ($row = $res->fetch_assoc()) {
+            $latest[] = [
+                'tanggal'     => $row['tanggal'],
+                'nama_balita' => $row['nama_balita'],
+                'umur_bulan'  => (int)$row['umur_bulan'],
+                'bb'          => (float)$row['bb'],
+                'tb'          => (float)$row['tb'],
+                'status_gizi' => $row['status_gizi'],
+            ];
+        }
+    }
+} catch (Throwable $e) {
+    // kalau error, biarkan $latest kosong
+}
 
 function badgeClassNakes($status) {
     switch ($status) {
@@ -97,7 +156,6 @@ function badgeClassNakes($status) {
       border-bottom: 2px solid #ffffffcc;
     }
 
-    /* ✅ Dropdown tidak putih lagi, ikut tema navbar */
     .navbar-nakes .dropdown-menu {
       background: linear-gradient(120deg, #0b5ed7cc, #0f9d58cc) !important;
       border-radius: 0.75rem;
@@ -159,6 +217,17 @@ function badgeClassNakes($status) {
       background: linear-gradient(120deg, #0b3a60, #0b7542);
       color: #e2f6fa;
       font-size: .85rem;
+    }
+    .stat-label {
+      font-size: .8rem;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: #6c757d;
+      margin-bottom: .2rem;
+    }
+    .stat-value {
+      font-size: 1.6rem;
+      font-weight: 600;
     }
   </style>
 </head>
@@ -337,8 +406,8 @@ function badgeClassNakes($status) {
                         <td><?= htmlspecialchars($row['tanggal']); ?></td>
                         <td><?= htmlspecialchars($row['nama_balita']); ?></td>
                         <td><?= (int)$row['umur_bulan']; ?></td>
-                        <td><?= htmlspecialchars($row['bb']); ?></td>
-                        <td><?= htmlspecialchars($row['tb']); ?></td>
+                        <td><?= htmlspecialchars(number_format($row['bb'], 1)); ?></td>
+                        <td><?= htmlspecialchars(number_format($row['tb'], 1)); ?></td>
                         <td>
                           <span class="badge badge-status <?= badgeClassNakes($row['status_gizi']); ?>">
                             <?= htmlspecialchars($row['status_gizi']); ?>
