@@ -83,7 +83,7 @@ function badgeClass($status) {
             return 'bg-secondary';
     }
 }
-?>
+?>  
 <!DOCTYPE html>
 <html lang="id">
 <head>

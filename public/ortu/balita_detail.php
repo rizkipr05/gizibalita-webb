@@ -5,23 +5,27 @@ require_once __DIR__ . '/../../includes/db.php';
 require_ortu();
 
 /**
- * Pastikan di proses login ORTU kamu set minimal:
+ * Ambil ID user ortu dari session.
+ * Di login ortu sebaiknya set:
  *   $_SESSION['user_id'] = <id user>;
  *   $_SESSION['name']    = <nama ortu>;
- *
- * Di sini kita ambil dari user_id, kalau tidak ada fallback ke id.
  */
 $ortu_id = (int)($_SESSION['user_id'] ?? $_SESSION['id'] ?? 0);
 
-/* =====================
-   1. Ambil Data Balita
-   ===================== */
+/* ==========================
+   1. Ambil detail data balita
+   ========================== */
 $balita = null;
+$umur_bulan = "-";
 
 if ($ortu_id > 0) {
     try {
-        $sql = "SELECT id, nama_balita, tanggal_lahir, jenis_kelamin 
-                FROM balitas 
+        $sql = "SELECT 
+                    id,
+                    nama_balita,
+                    tanggal_lahir,
+                    jenis_kelamin
+                FROM balitas
                 WHERE user_ortu_id = ?
                 LIMIT 1";
         $stmt = $mysqli->prepare($sql);
@@ -32,14 +36,12 @@ if ($ortu_id > 0) {
             $stmt->close();
         }
     } catch (Throwable $e) {
-        // optional logging
-        // error_log('Error ambil balita: '.$e->getMessage());
+        // optional: log error kalau mau
+        // error_log('Error ambil detail balita: '.$e->getMessage());
     }
 }
 
-/* Hitung umur bulan (tahun*12 + bulan) */
-$umur_bulan = "-";
-
+/* Hitung umur dalam bulan (konsisten dengan dashboard) */
 if ($balita && !empty($balita['tanggal_lahir']) && $balita['tanggal_lahir'] !== '0000-00-00') {
     try {
         $lahir = new DateTime(trim($balita['tanggal_lahir']));
@@ -47,10 +49,7 @@ if ($balita && !empty($balita['tanggal_lahir']) && $balita['tanggal_lahir'] !== 
 
         if ($lahir <= $now) {
             $diff       = $now->diff($lahir);
-            // Umur bulan = jumlah tahun * 12 + sisa bulan
             $umur_bulan = ($diff->y * 12) + $diff->m;
-
-            // Kalau hasil minus (tanggal lahir lebih besar dari hari ini), paksa 0
             if ($umur_bulan < 0) {
                 $umur_bulan = 0;
             }
@@ -62,57 +61,22 @@ if ($balita && !empty($balita['tanggal_lahir']) && $balita['tanggal_lahir'] !== 
     }
 }
 
-/* =========================================
-   2. Ambil Status Gizi Terbaru Pemeriksaan
-   ========================================= */
-$latest = null;
-
-if ($balita) {
+/* Helper format tanggal sederhana (dd-mm-YYYY) */
+function format_tanggal_id(?string $tanggal): string {
+    if (!$tanggal || $tanggal === '0000-00-00') return '-';
     try {
-        $sql = "SELECT 
-                    tanggal_pemeriksaan,
-                    umur_bulan,
-                    berat_badan,
-                    tinggi_badan,
-                    lingkar_lengan,
-                    status_gizi
-                FROM pemeriksaans
-                WHERE balita_id = ?
-                ORDER BY tanggal_pemeriksaan DESC, id DESC
-                LIMIT 1";
-
-        $stmt = $mysqli->prepare($sql);
-        if ($stmt) {
-            $balita_id = (int)$balita['id'];
-            $stmt->bind_param("i", $balita_id);
-            $stmt->execute();
-            $latest = $stmt->get_result()->fetch_assoc();
-            $stmt->close();
-        }
+        $dt = new DateTime($tanggal);
+        return $dt->format('d-m-Y');
     } catch (Throwable $e) {
-        // optional logging
-        // error_log('Error ambil pemeriksaan: '.$e->getMessage());
+        return $tanggal;
     }
-}
-
-/* Badge warna */
-function badgeClass($status) {
-    return match ($status) {
-        'Gizi Baik'         => 'bg-success',
-        'Gizi Kurang',
-        'Gizi Buruk'        => 'bg-danger',
-        'Risiko Gizi Lebih' => 'bg-warning text-dark',
-        'Gizi Lebih',
-        'Obesitas'          => 'bg-orange',
-        default             => 'bg-secondary',
-    };
 }
 ?>
 <!DOCTYPE html>
 <html lang="id">
 <head>
   <meta charset="UTF-8">
-  <title>Dashboard Orang Tua</title>
+  <title>Detail Data Balita</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
   <!-- Bootstrap -->
@@ -178,11 +142,6 @@ function badgeClass($status) {
       box-shadow: 0 16px 35px rgba(0,0,0,0.06);
       background: #ffffff;
     }
-    .badge-status {
-      font-size: .95rem;
-      padding: .4rem .85rem;
-      border-radius: 999px;
-    }
     .chip {
       display: inline-flex;
       align-items: center;
@@ -192,10 +151,6 @@ function badgeClass($status) {
       font-size: .8rem;
       color: #3d6653;
       border: 1px solid #e0f2ea;
-    }
-    .bg-orange {
-      background-color: #ffb347;
-      color: #212529;
     }
 
     /* FOOTER */
@@ -232,7 +187,7 @@ function badgeClass($status) {
       <ul class="navbar-nav ms-auto mb-2 mb-lg-0 align-items-lg-center">
 
         <li class="nav-item mx-lg-1">
-          <a class="nav-link active" href="<?= BASE_URL ?>/ortu/dashboard.php">Beranda</a>
+          <a class="nav-link" href="<?= BASE_URL ?>/ortu/dashboard.php">Beranda</a>
         </li>
 
         <li class="nav-item mx-lg-1">
@@ -271,91 +226,84 @@ function badgeClass($status) {
   <div class="container-fluid px-4 px-md-5">
     <div class="row g-4">
 
-      <!-- Sapaan -->
+      <!-- Header kecil + tombol kembali -->
       <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h5 class="mb-0">Detail Data Balita</h5>
+          <a href="<?= BASE_URL ?>/ortu/dashboard.php" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-arrow-left me-1"></i> Kembali ke Dashboard
+          </a>
+        </div>
+        <p class="text-muted mb-3">
+          Informasi detail tentang balita yang terdaftar pada akun ini.
+        </p>
+      </div>
+
+      <!-- Card detail balita -->
+      <div class="col-12 col-lg-8">
         <div class="card card-soft">
-          <div class="card-body d-md-flex align-items-center justify-content-between">
-            <div>
-              <h5 class="mb-1">Halo, <?= htmlspecialchars($_SESSION['name'] ?? '') ?></h5>
-              <p class="text-muted mb-2">
-                Pantau status gizi dan perkembangan balita Anda langsung dari dashboard ini.
-              </p>
-              <span class="chip">
-                <i class="bi bi-info-circle me-1"></i>
-                Tips: lakukan pemeriksaan rutin minimal sebulan sekali.
-              </span>
-            </div>
-            <div class="mt-3 mt-md-0 text-md-end">
-              <a href="<?= BASE_URL ?>/ortu/artikel_list.php" class="btn btn-light btn-sm border">
-                <i class="bi bi-journal-text me-1"></i> Baca Artikel Gizi
-              </a>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Profil Balita -->
-      <div class="col-md-6 col-xl-5">
-        <div class="card card-soft h-100">
           <div class="card-body">
-            <h6 class="text-uppercase text-muted mb-3">Profil Balita</h6>
-
             <?php if ($balita): ?>
-              <h4 class="mb-1"><?= htmlspecialchars($balita['nama_balita']) ?></h4>
-              <p class="text-muted mb-1">
-                Umur: <?= is_numeric($umur_bulan) ? $umur_bulan . ' bulan' : $umur_bulan; ?>
-              </p>
-              <p class="text-muted small mb-3">
-                Jenis Kelamin: <?= $balita['jenis_kelamin'] === 'L' ? 'Laki-laki' : 'Perempuan' ?>
-              </p>
-            <?php else: ?>
-              <h4 class="mb-1">Belum Ada Data</h4>
-              <p class="text-muted small">
-                Data balita akan muncul setelah diinput oleh tenaga kesehatan.
-              </p>
-            <?php endif; ?>
+              <h4 class="mb-3"><?= htmlspecialchars($balita['nama_balita']) ?></h4>
 
-            <a href="<?= BASE_URL ?>/ortu/balita_detail.php" class="btn btn-outline-success btn-sm">
-              <i class="bi bi-person-badge me-1"></i> Lihat Detail Balita
-            </a>
+              <div class="row mb-2">
+                <div class="col-sm-4 text-muted">Nama Balita</div>
+                <div class="col-sm-8"><?= htmlspecialchars($balita['nama_balita']) ?></div>
+              </div>
+
+              <div class="row mb-2">
+                <div class="col-sm-4 text-muted">Tanggal Lahir</div>
+                <div class="col-sm-8"><?= htmlspecialchars(format_tanggal_id($balita['tanggal_lahir'] ?? null)) ?></div>
+              </div>
+
+              <div class="row mb-2">
+                <div class="col-sm-4 text-muted">Umur</div>
+                <div class="col-sm-8">
+                  <?= is_numeric($umur_bulan) ? $umur_bulan . ' bulan' : $umur_bulan; ?>
+                </div>
+              </div>
+
+              <div class="row mb-2">
+                <div class="col-sm-4 text-muted">Jenis Kelamin</div>
+                <div class="col-sm-8">
+                  <?= ($balita['jenis_kelamin'] ?? '') === 'L' ? 'Laki-laki' : 'Perempuan'; ?>
+                </div>
+              </div>
+
+              <hr class="my-3">
+
+              <p class="small text-muted mb-1">
+                Jika ada perbedaan data, silakan hubungi petugas kesehatan untuk pembaruan.
+              </p>
+
+            <?php else: ?>
+              <div class="text-center py-5">
+                <i class="bi bi-exclamation-circle fs-1 text-muted mb-3"></i>
+                <h6 class="mb-1">Belum ada data balita</h6>
+                <p class="text-muted small mb-3">
+                  Data balita akan muncul setelah diinput oleh tenaga kesehatan atau admin puskesmas.
+                </p>
+                <a href="<?= BASE_URL ?>/ortu/dashboard.php" class="btn btn-success btn-sm">
+                  <i class="bi bi-arrow-left me-1"></i> Kembali ke Dashboard
+                </a>
+              </div>
+            <?php endif; ?>
           </div>
         </div>
       </div>
 
-      <!-- Status Gizi Terbaru -->
-      <div class="col-md-6 col-xl-7">
-        <div class="card card-soft h-100">
+      <!-- Info tambahan / tips -->
+      <div class="col-12 col-lg-4">
+        <div class="card card-soft">
           <div class="card-body">
-            <h6 class="text-uppercase text-muted mb-3">Status Gizi Terbaru</h6>
-
-            <?php if ($latest): ?>
-              <span class="badge badge-status <?= badgeClass($latest['status_gizi']) ?> mb-2">
-                <?= htmlspecialchars($latest['status_gizi']) ?>
-              </span>
-
-              <p class="text-muted mb-1">
-                Pemeriksaan terakhir:
-                <strong><?= htmlspecialchars($latest['tanggal_pemeriksaan']) ?></strong>
-              </p>
-              <p class="small text-muted mb-3">
-                Berat: <?= $latest['berat_badan'] ?> kg • Tinggi: <?= $latest['tinggi_badan'] ?> cm
-              </p>
-
-            <?php else: ?>
-              <span class="badge badge-status bg-secondary mb-2">Belum Ada Data</span>
-              <p class="text-muted small mb-2">
-                Status gizi akan muncul setelah pemeriksaan pertama dilakukan.
-              </p>
-            <?php endif; ?>
-
-            <div class="d-flex flex-wrap gap-2">
-              <a href="<?= BASE_URL ?>/ortu/pemeriksaan_riwayat.php" class="btn btn-outline-success btn-sm">
-                <i class="bi bi-clock-history me-1"></i> Riwayat Pemeriksaan
-              </a>
-              <a href="<?= BASE_URL ?>/ortu/grafik_perkembangan.php" class="btn btn-outline-primary btn-sm">
-                <i class="bi bi-graph-up-arrow me-1"></i> Grafik Perkembangan
-              </a>
-            </div>
+            <h6 class="text-uppercase text-muted mb-3">Tips</h6>
+            <p class="small text-muted mb-2">
+              Data balita digunakan sebagai dasar pemantauan status gizi dan tumbuh kembang.
+            </p>
+            <p class="small text-muted mb-0">
+              Pastikan tanggal lahir dan jenis kelamin tercatat dengan benar agar perhitungan umur
+              dan interpretasi status gizi sesuai.
+            </p>
           </div>
         </div>
       </div>

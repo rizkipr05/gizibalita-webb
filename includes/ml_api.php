@@ -1,15 +1,30 @@
 <?php
 
 /**
+ * Helper untuk memanggil layanan ML (Python) di http://127.0.0.1:5000/predict
+ * Versi ini SELARAS dengan model kp_smote.py yang pakai fitur:
+ *   JK, Umur, BB, TB, LILA
+ */
+
+/**
  * Panggil layanan ML (Python) untuk memprediksi status gizi.
  *
  * @param int         $umur_bulan      Umur balita (bulan)
  * @param string      $jenis_kelamin   'L' atau 'P'
- * @param float       $berat_badan     kg  (saat ini belum dipakai model, tapi bisa kamu teruskan ke Python kalau mau)
- * @param float       $tinggi_badan    cm  (sama seperti berat_badan)
- * @param float|null  $lingkar_lengan  cm (boleh null)
+ * @param float       $berat_badan     kg
+ * @param float       $tinggi_badan    cm
+ * @param float|null  $lingkar_lengan  cm (boleh null, default 0 kalau null)
  *
  * @return array|null
+ *   Contoh sukses:
+ *   [
+ *     'success'     => true,
+ *     'class_id'    => 2,
+ *     'class_label' => 'Gizi Baik',
+ *     'status_gizi' => 'Gizi Baik'
+ *   ]
+ *   atau kalau error:
+ *   [ 'error' => '...' ]
  */
 function ml_predict_status_gizi(
     int $umur_bulan,
@@ -20,22 +35,16 @@ function ml_predict_status_gizi(
 ): ?array {
     $url = "http://127.0.0.1:5000/predict";
 
-    // ⚠️ Di sini kita SESUAIKAN dengan yang dicari Python:
-    //   'Umur', 'JK', 'BB/U', 'TB/U', 'LILA', 'ZS BB/U', 'ZS TB/U', 'ZS BB/TB'
-    // Kolom yang tidak kamu input (BB/U, TB/U, ZS) sementara diisi default.
+    // Payload HARUS cocok dengan yang diharapkan Python:
+    //   JK, Umur, BB, TB, LILA
     $payload = [
-        "Umur"      => (string)$umur_bulan,                  // Python pakai regex angka, jadi cukup "24"
-        "JK"        => $jenis_kelamin,                       // 'L' / 'P'
-        "BB/U"      => "Normal",                             // default sementara
-        "TB/U"      => "Normal",                             // default sementara
-        "LILA"      => $lingkar_lengan !== null
-                            ? (string)$lingkar_lengan
-                            : "0",
-        "ZS BB/U"   => "0",                                  // default
-        "ZS TB/U"   => "0",                                  // default
-        "ZS BB/TB"  => "0",                                  // default
-        // kalau kamu nanti mau pakai berat_badan / tinggi_badan,
-        // bisa tambahkan di sini dengan nama kolom persis seperti di CSV.
+        "JK"   => $jenis_kelamin,             // 'L' / 'P'
+        "Umur" => (string) $umur_bulan,       // boleh "24" atau "24 Bulan"
+        "BB"   => (string) $berat_badan,      // kg
+        "TB"   => (string) $tinggi_badan,     // cm
+        "LILA" => $lingkar_lengan !== null
+                    ? (string) $lingkar_lengan
+                    : "0",
     ];
 
     $ch = curl_init();
@@ -63,7 +72,7 @@ function ml_predict_status_gizi(
         ];
     }
 
-    // (curl_close dibiarkan tidak dipanggil supaya Intelephense tidak protes "deprecated")
+    // (curl_close sengaja tidak dipanggil di sini, tidak masalah secara praktis)
 
     $decoded = json_decode($response, true);
 
@@ -75,14 +84,13 @@ function ml_predict_status_gizi(
         ];
     }
 
-    // Kalau di Python kamu pakai format { success, class_label, class_id, error }
+    // Jika Python mengembalikan success=false
     if (isset($decoded['success']) && $decoded['success'] === false && isset($decoded['error'])) {
         return [
             'error' => $decoded['error'],
         ];
     }
 
-    // Normalisasi nama field: class_label -> status_gizi
     if (isset($decoded['class_label']) && !isset($decoded['status_gizi'])) {
         $decoded['status_gizi'] = $decoded['class_label'];
     }

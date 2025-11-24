@@ -111,6 +111,7 @@ if (empty($umurBulan)) {
       background: radial-gradient(circle at top left, #f1fff7 0, #f8fffb 40%, #ffffff 100%);
     }
 
+    /* NAVBAR */
     .navbar-custom {
       background: linear-gradient(120deg, var(--brand-main), #34c785);
     }
@@ -119,20 +120,49 @@ if (empty($umurBulan)) {
     .navbar-custom .dropdown-item {
       color: #fdfdfd !important;
     }
+    .navbar-custom .nav-link {
+      opacity: .85;
+    }
+    .navbar-custom .nav-link:hover {
+      opacity: 1;
+    }
     .navbar-custom .nav-link.active {
       font-weight: 600;
       border-bottom: 2px solid #ffffffcc;
     }
+    .navbar-custom .dropdown-menu {
+      background: #ffffff;
+      border-radius: .75rem;
+      border: none;
+      box-shadow: 0 12px 30px rgba(0,0,0,0.1);
+      padding-top: .5rem;
+      padding-bottom: .5rem;
+    }
+    .navbar-custom .dropdown-item {
+      color: #444 !important;
+    }
+    .navbar-custom .dropdown-item.text-danger {
+      color: #dc3545 !important;
+    }
 
+    /* MAIN CONTENT */
     .page-wrapper {
       flex: 1 0 auto;
       padding: 32px 0 40px;
     }
-    .card-soft {
+    .card-article {
       border: none;
       border-radius: 1.2rem;
       box-shadow: 0 16px 35px rgba(0,0,0,0.06);
       background: #ffffff;
+    }
+    .badge-kategori {
+      background-color: var(--brand-soft);
+      color: var(--brand-dark);
+      border-radius: 999px;
+      padding: .25rem .75rem;
+      font-size: .75rem;
+      font-weight: 500;
     }
     .badge-status {
       font-size: .95rem;
@@ -149,12 +179,20 @@ if (empty($umurBulan)) {
       color: #3d6653;
       border: 1px solid #e0f2ea;
     }
-    .bg-orange { background-color: #ffb347; color:#212529; }
 
+    /* FOOTER */
     footer {
       flex-shrink: 0;
       background: linear-gradient(120deg, #0b4125, #0b7542);
       color: #e2f6ea;
+      font-size: .85rem;
+    }
+    footer a {
+      color: #b8f3d1;
+      text-decoration: none;
+    }
+    footer a:hover {
+      text-decoration: underline;
     }
   </style>
 </head>
