@@ -41,12 +41,13 @@ try {
             p.id,
             DATE(p.tanggal_pemeriksaan) AS tanggal,
             p.umur_bulan,
-            p.berat_badan AS bb,
-            p.tinggi_badan AS tb,
+            p.berat_badan   AS bb,
+            p.tinggi_badan  AS tb,
             p.status_gizi,
+            b.id            AS balita_id,
             b.nama_balita,
-            n.name AS nakes,
-            o.name AS nama_ortu
+            n.name          AS nakes,
+            o.name          AS nama_ortu
         FROM pemeriksaans p
         JOIN balitas b ON b.id = p.balita_id
         LEFT JOIN users n ON n.id = p.nakes_id
@@ -99,7 +100,8 @@ try {
 
         while ($row = $res->fetch_assoc()) {
             $pemeriksaanList[] = [
-                'id'          => (int)$row['id'],
+                'id'          => (int)$row['id'],          // ID pemeriksaan
+                'balita_id'   => (int)$row['balita_id'],   // ID BALITA
                 'tanggal'     => $row['tanggal'],
                 'nama_balita' => $row['nama_balita'],
                 'umur_bulan'  => (int)$row['umur_bulan'],
@@ -436,7 +438,7 @@ try {
                   <th>TB (cm)</th>
                   <th>Status Gizi</th>
                   <th>Petugas</th>
-                  <th style="width:18%;">Aksi</th>
+                  <th style="width:22%;">Aksi</th>
                 </tr>
               </thead>
               <tbody>
@@ -448,7 +450,9 @@ try {
                     <td>
                       <?= htmlspecialchars($p['nama_balita']); ?>
                       <?php if (!empty($p['nama_ortu'])): ?>
-                        <div class="small text-muted">Ortu: <?= htmlspecialchars($p['nama_ortu']); ?></div>
+                        <div class="small text-muted">
+                          Ortu: <?= htmlspecialchars($p['nama_ortu']); ?>
+                        </div>
                       <?php endif; ?>
                     </td>
                     <td><?= (int)$p['umur_bulan']; ?></td>
@@ -462,20 +466,25 @@ try {
                     <td><?= htmlspecialchars($p['nakes'] ?: 'Tenaga Kesehatan'); ?></td>
                     <td>
                       <div class="btn-group btn-group-sm" role="group">
+                        <!-- DETAIL BALITA: pakai balita_id -->
                         <a
-                          href="<?= BASE_URL ?>/nakes/pemeriksaan_detail.php?id=<?= (int)$p['id'] ?>"
-                          class="btn btn-outline-secondary"
-                          title="Detail"
+                          href="<?= BASE_URL ?>/nakes/balita_detail.php?id=<?= (int)$p['balita_id']; ?>"
+                          class="btn btn-outline-primary"
+                          title="Detail Balita & Grafik"
                         >
-                          <i class="bi bi-eye"></i>
+                          <i class="bi bi-person-lines-fill me-1"></i> Detail
                         </a>
+
+                        <!-- CETAK: pakai id pemeriksaan -->
                         <a
-                          href="#"
+                          href="<?= BASE_URL ?>/nakes/pemeriksaan_cetak.php?id=<?= (int)$p['id']; ?>"
                           class="btn btn-outline-secondary"
-                          title="Cetak"
+                          title="Cetak Pemeriksaan"
+                          target="_blank"
                         >
                           <i class="bi bi-printer"></i>
                         </a>
+
                         <button
                           type="button"
                           class="btn btn-outline-danger"

@@ -9,7 +9,7 @@ require_ortu();
    ========================================================== */
 $ortuId = $_SESSION["user_id"] ?? 0;
 
-$balita = null;
+$balita   = null;
 $balitaId = 0;
 
 $stmt = $mysqli->prepare("
@@ -23,7 +23,7 @@ $stmt->execute();
 $res = $stmt->get_result();
 
 if ($res && ($row = $res->fetch_assoc())) {
-    $balita = $row;
+    $balita   = $row;
     $balitaId = (int)$row['id'];
 }
 $stmt->close();
@@ -35,17 +35,16 @@ $umurBulan   = [];
 $beratBadan  = [];
 $tinggiBadan = [];
 
-$status_gizi = "-";
+$status_gizi  = "-";
 $tgl_terakhir = null;
 
 if ($balitaId > 0) {
-
     // Status gizi terakhir
     $stmt = $mysqli->prepare("
         SELECT status_gizi, tanggal_pemeriksaan
         FROM pemeriksaans
         WHERE balita_id = ?
-        ORDER BY tanggal_pemeriksaan DESC
+        ORDER BY tanggal_pemeriksaan DESC, id DESC
         LIMIT 1
     ");
     $stmt->bind_param("i", $balitaId);
@@ -58,12 +57,12 @@ if ($balitaId > 0) {
     }
     $stmt->close();
 
-    // Data grafik
+    // Data grafik (urut dari yang paling awal)
     $stmt = $mysqli->prepare("
         SELECT umur_bulan, berat_badan, tinggi_badan
         FROM pemeriksaans
         WHERE balita_id = ?
-        ORDER BY tanggal_pemeriksaan ASC
+        ORDER BY tanggal_pemeriksaan ASC, id ASC
     ");
     $stmt->bind_param("i", $balitaId);
     $stmt->execute();
@@ -77,6 +76,9 @@ if ($balitaId > 0) {
     $stmt->close();
 }
 
+/* Apakah data asli ada? */
+$hasRealData = !empty($umurBulan);
+
 /* ==========================================================
    3) Dummy jika belum ada data
    ========================================================== */
@@ -84,6 +86,19 @@ if (empty($umurBulan)) {
     $umurBulan   = [12, 14, 16, 18, 20, 22, 24];
     $beratBadan  = [8.5, 8.9, 9.3, 9.8, 10.2, 10.8, 11.5];
     $tinggiBadan = [72, 74, 76, 78, 80, 83, 85];
+}
+
+/* Badge warna status gizi (optional) */
+function badgeClass($status) {
+    return match ($status) {
+        'Gizi Baik'         => 'bg-success',
+        'Gizi Kurang',
+        'Gizi Buruk'        => 'bg-danger',
+        'Risiko Gizi Lebih' => 'bg-warning text-dark',
+        'Gizi Lebih',
+        'Obesitas'          => 'bg-orange text-dark',
+        default             => 'bg-secondary',
+    };
 }
 ?>
 <!DOCTYPE html>
@@ -179,6 +194,16 @@ if (empty($umurBulan)) {
       color: #3d6653;
       border: 1px solid #e0f2ea;
     }
+    .bg-orange {
+      background-color: #ffb347 !important;
+      color: #212529 !important;
+    }
+
+    .chart-wrapper {
+      position: relative;
+      width: 100%;
+      height: 320px;
+    }
 
     /* FOOTER */
     footer {
@@ -272,36 +297,73 @@ if (empty($umurBulan)) {
 <div class="page-wrapper">
   <div class="container-fluid px-4 px-md-5">
 
-    <h4 class="mb-1">Grafik Perkembangan Balita</h4>
-    <p class="text-muted">
-      Pantau perubahan berat dan tinggi badan seiring pertambahan umur.
-    </p>
-
-    <h5>
-      Status Gizi Terakhir: 
-      <strong class="text-primary"><?= htmlspecialchars($status_gizi) ?></strong>
-
-      <?php if ($tgl_terakhir): ?>
-        <span class="text-muted small">(<?= date('d-m-Y', strtotime($tgl_terakhir)); ?>)</span>
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-2">
+      <div>
+        <h4 class="mb-1">Grafik Perkembangan Balita</h4>
+        <p class="text-muted mb-0">
+          Pantau perubahan berat dan tinggi badan seiring pertambahan umur (dalam bulan).
+        </p>
+      </div>
+      <?php if ($balita): ?>
+        <div class="text-md-end mt-2 mt-md-0">
+          <span class="chip">
+            <i class="bi bi-person-badge me-1"></i>
+            <?= htmlspecialchars($balita['nama_balita']) ?>
+          </span>
+        </div>
       <?php endif; ?>
-    </h5>
+    </div>
 
-    <div class="row g-4 mt-3">
+    <div class="mt-3 mb-3">
+      <span class="badge badge-status <?= badgeClass($status_gizi) ?>">
+        Status Gizi Terakhir: <?= htmlspecialchars($status_gizi) ?>
+      </span>
+      <?php if ($tgl_terakhir): ?>
+        <span class="text-muted small ms-2">
+          (Pemeriksaan: <?= date('d-m-Y', strtotime($tgl_terakhir)); ?>)
+        </span>
+      <?php endif; ?>
+
+      <?php if (!$hasRealData): ?>
+        <div class="mt-2">
+          <span class="chip">
+            <i class="bi bi-info-circle me-1"></i>
+            Grafik di bawah masih menggunakan data contoh. Data asli akan muncul setelah pemeriksaan pertama dilakukan.
+          </span>
+        </div>
+      <?php endif; ?>
+    </div>
+
+    <div class="row g-4 mt-1">
 
       <div class="col-md-6">
-        <div class="card card-soft">
+        <div class="card card-article h-100">
           <div class="card-body">
-            <h6 class="text-uppercase text-muted">Berat Badan / Umur</h6>
-            <canvas id="chartBBU"></canvas>
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <h6 class="text-uppercase text-muted mb-0">Berat Badan / Umur</h6>
+              <span class="badge-kategori">
+                <i class="bi bi-activity me-1"></i> Kg per bulan
+              </span>
+            </div>
+            <div class="chart-wrapper mt-2">
+              <canvas id="chartBBU"></canvas>
+            </div>
           </div>
         </div>
       </div>
 
       <div class="col-md-6">
-        <div class="card card-soft">
+        <div class="card card-article h-100">
           <div class="card-body">
-            <h6 class="text-uppercase text-muted">Tinggi Badan / Umur</h6>
-            <canvas id="chartTBU"></canvas>
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <h6 class="text-uppercase text-muted mb-0">Tinggi Badan / Umur</h6>
+              <span class="badge-kategori">
+                <i class="bi bi-graph-up-arrow me-1"></i> Cm per bulan
+              </span>
+            </div>
+            <div class="chart-wrapper mt-2">
+              <canvas id="chartTBU"></canvas>
+            </div>
           </div>
         </div>
       </div>
@@ -326,32 +388,140 @@ const umurLabels = <?= json_encode($umurBulan) ?>;
 const dataBB     = <?= json_encode($beratBadan) ?>;
 const dataTB     = <?= json_encode($tinggiBadan) ?>;
 
-new Chart(document.getElementById('chartBBU'), {
-  type: 'line',
-  data: {
-    labels: umurLabels,
-    datasets: [{
-      label: 'Berat (kg)',
-      data: dataBB,
-      borderColor: '#0f9d58',
-      borderWidth: 2,
-      tension: 0.3
-    }]
-  }
-});
+// Helper: buat chart dengan gradient
+function createGradient(ctx, colorTop, colorBottom) {
+  const gradient = ctx.createLinearGradient(0, 0, 0, ctx.canvas.height);
+  gradient.addColorStop(0, colorTop);
+  gradient.addColorStop(1, colorBottom);
+  return gradient;
+}
 
-new Chart(document.getElementById('chartTBU'), {
-  type: 'line',
-  data: {
-    labels: umurLabels,
-    datasets: [{
-      label: 'Tinggi (cm)',
-      data: dataTB,
-      borderColor: '#0b5ed7',
-      borderWidth: 2,
-      tension: 0.3
-    }]
-  }
+window.addEventListener('load', () => {
+  const ctxBB = document.getElementById('chartBBU').getContext('2d');
+  const ctxTB = document.getElementById('chartTBU').getContext('2d');
+
+  const gradientBB = createGradient(
+    ctxBB,
+    'rgba(15, 157, 88, 0.35)',
+    'rgba(15, 157, 88, 0)'
+  );
+  const gradientTB = createGradient(
+    ctxTB,
+    'rgba(11, 94, 215, 0.35)',
+    'rgba(11, 94, 215, 0)'
+  );
+
+  const commonOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        position: 'top',
+        labels: {
+          usePointStyle: true,
+          padding: 16
+        }
+      },
+      tooltip: {
+        mode: 'index',
+        intersect: false,
+        callbacks: {
+          label: function(context) {
+            const label = context.dataset.label || '';
+            const value = context.parsed.y;
+            return label + ': ' + value;
+          }
+        }
+      }
+    },
+    interaction: {
+      mode: 'index',
+      intersect: false
+    },
+    scales: {
+      x: {
+        title: {
+          display: true,
+          text: 'Umur (bulan)'
+        },
+        grid: {
+          display: false
+        }
+      }
+    }
+  };
+
+  new Chart(ctxBB, {
+    type: 'line',
+    data: {
+      labels: umurLabels,
+      datasets: [{
+        label: 'Berat (kg)',
+        data: dataBB,
+        borderColor: '#0f9d58',
+        backgroundColor: gradientBB,
+        borderWidth: 2,
+        tension: 0.35,
+        fill: true,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        pointBackgroundColor: '#0f9d58',
+        pointBorderWidth: 1
+      }]
+    },
+    options: {
+      ...commonOptions,
+      scales: {
+        ...commonOptions.scales,
+        y: {
+          beginAtZero: true,
+          title: {
+            display: true,
+            text: 'Berat Badan (kg)'
+          },
+          grid: {
+            color: 'rgba(0, 0, 0, 0.05)'
+          }
+        }
+      }
+    }
+  });
+
+  new Chart(ctxTB, {
+    type: 'line',
+    data: {
+      labels: umurLabels,
+      datasets: [{
+        label: 'Tinggi (cm)',
+        data: dataTB,
+        borderColor: '#0b5ed7',
+        backgroundColor: gradientTB,
+        borderWidth: 2,
+        tension: 0.35,
+        fill: true,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        pointBackgroundColor: '#0b5ed7',
+        pointBorderWidth: 1
+      }]
+    },
+    options: {
+      ...commonOptions,
+      scales: {
+        ...commonOptions.scales,
+        y: {
+          beginAtZero: true,
+          title: {
+            display: true,
+            text: 'Tinggi Badan (cm)'
+          },
+          grid: {
+            color: 'rgba(0, 0, 0, 0.05)'
+          }
+        }
+      }
+    }
+  });
 });
 </script>
 

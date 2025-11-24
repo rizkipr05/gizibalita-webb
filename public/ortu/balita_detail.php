@@ -15,8 +15,8 @@ $ortu_id = (int)($_SESSION['user_id'] ?? $_SESSION['id'] ?? 0);
 /* ==========================
    1. Ambil detail data balita
    ========================== */
-$balita = null;
-$umur_bulan = "-";
+$balita     = null;
+$umur_bulan = "-"; // akan diisi dari riwayat gizi dulu
 
 if ($ortu_id > 0) {
     try {
@@ -36,13 +36,46 @@ if ($ortu_id > 0) {
             $stmt->close();
         }
     } catch (Throwable $e) {
-        // optional: log error kalau mau
+        // optional: log error
         // error_log('Error ambil detail balita: '.$e->getMessage());
     }
 }
 
-/* Hitung umur dalam bulan (konsisten dengan dashboard) */
-if ($balita && !empty($balita['tanggal_lahir']) && $balita['tanggal_lahir'] !== '0000-00-00') {
+/* =======================================================
+   2. Ambil UMUR dari RIWAYAT GIZI (pemeriksaans.umur_bulan)
+      - diambil pemeriksaan TERBARU
+   ======================================================= */
+if ($balita) {
+    try {
+        $sql = "
+            SELECT umur_bulan
+            FROM pemeriksaans
+            WHERE balita_id = ?
+            ORDER BY tanggal_pemeriksaan DESC, id DESC
+            LIMIT 1
+        ";
+        $stmt = $mysqli->prepare($sql);
+        if ($stmt) {
+            $balita_id = (int)$balita['id'];
+            $stmt->bind_param("i", $balita_id);
+            $stmt->execute();
+            $res = $stmt->get_result();
+            if ($row = $res->fetch_assoc()) {
+                $umur_bulan = (int)$row['umur_bulan'];   // umur dari RIWAYAT GIZI
+            }
+            $stmt->close();
+        }
+    } catch (Throwable $e) {
+        // kalau error, biarkan nanti jatuh ke perhitungan tanggal lahir
+        // error_log('Error ambil umur dari riwayat: '.$e->getMessage());
+    }
+}
+
+/* =====================================================
+   3. Kalau BELUM ada riwayat, baru hitung dari lahir
+      (konsisten dengan dashboard ORTU sebelumnya)
+   ===================================================== */
+if ($umur_bulan === "-" && $balita && !empty($balita['tanggal_lahir']) && $balita['tanggal_lahir'] !== '0000-00-00') {
     try {
         $lahir = new DateTime(trim($balita['tanggal_lahir']));
         $now   = new DateTime();
@@ -152,6 +185,15 @@ function format_tanggal_id(?string $tanggal): string {
       color: #3d6653;
       border: 1px solid #e0f2ea;
     }
+    .pill-gender {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: .2rem .65rem;
+      font-size: .75rem;
+      background-color: var(--brand-soft);
+      color: var(--brand-dark);
+    }
 
     /* FOOTER */
     footer {
@@ -171,7 +213,7 @@ function format_tanggal_id(?string $tanggal): string {
 </head>
 <body>
 
-<!-- NAVBAR -->
+<!-- NAVBAR ORTU -->
 <nav class="navbar navbar-expand-lg navbar-custom shadow-sm">
   <div class="container-fluid px-4 px-md-5">
     <a class="navbar-brand fw-bold d-flex align-items-center" href="<?= BASE_URL ?>/ortu/dashboard.php">
@@ -210,9 +252,17 @@ function format_tanggal_id(?string $tanggal): string {
             <span class="d-none d-sm-inline"><?= htmlspecialchars($_SESSION['name'] ?? 'Orang Tua'); ?></span>
           </a>
           <ul class="dropdown-menu dropdown-menu-end mt-2">
-            <li><a class="dropdown-item" href="<?= BASE_URL ?>/ortu/profile.php"><i class="bi bi-person-circle me-2"></i> Profil</a></li>
+            <li>
+              <a class="dropdown-item" href="<?= BASE_URL ?>/ortu/profile.php">
+                <i class="bi bi-person-circle me-2"></i> Profil
+              </a>
+            </li>
             <li><hr class="dropdown-divider"></li>
-            <li><a class="dropdown-item text-danger" href="<?= BASE_URL ?>/logout.php"><i class="bi bi-box-arrow-right me-2"></i> Logout</a></li>
+            <li>
+              <a class="dropdown-item text-danger" href="<?= BASE_URL ?>/logout.php">
+                <i class="bi bi-box-arrow-right me-2"></i> Logout
+              </a>
+            </li>
           </ul>
         </li>
 
@@ -226,25 +276,38 @@ function format_tanggal_id(?string $tanggal): string {
   <div class="container-fluid px-4 px-md-5">
     <div class="row g-4">
 
-      <!-- Header kecil + tombol kembali -->
+      <!-- Header + tombol kembali (mirip pemeriksaan_detail user) -->
       <div class="col-12">
         <div class="d-flex justify-content-between align-items-center mb-2">
-          <h5 class="mb-0">Detail Data Balita</h5>
-          <a href="<?= BASE_URL ?>/ortu/dashboard.php" class="btn btn-outline-secondary btn-sm">
+          <div>
+            <h5 class="mb-0">Detail Data Balita</h5>
+            <p class="text-muted mb-0">
+              Informasi lengkap balita yang terdaftar pada akun Anda.
+            </p>
+          </div>
+          <a href="<?= BASE_URL ?>/ortu/dashboard.php" class="btn btn-outline-light btn-sm text-white border border-light">
             <i class="bi bi-arrow-left me-1"></i> Kembali ke Dashboard
           </a>
         </div>
-        <p class="text-muted mb-3">
-          Informasi detail tentang balita yang terdaftar pada akun ini.
-        </p>
       </div>
 
-      <!-- Card detail balita -->
-      <div class="col-12 col-lg-8">
+      <!-- Kolom kiri: Detail balita -->
+      <div class="col-12 col-lg-7">
         <div class="card card-soft">
           <div class="card-body">
             <?php if ($balita): ?>
-              <h4 class="mb-3"><?= htmlspecialchars($balita['nama_balita']) ?></h4>
+              <div class="d-flex align-items-center justify-content-between mb-3">
+                <div>
+                  <h4 class="mb-1"><?= htmlspecialchars($balita['nama_balita']) ?></h4>
+                  <span class="pill-gender">
+                    <?php if (($balita['jenis_kelamin'] ?? '') === 'L'): ?>
+                      <i class="bi bi-gender-male me-1"></i> Laki-laki
+                    <?php else: ?>
+                      <i class="bi bi-gender-female me-1"></i> Perempuan
+                    <?php endif; ?>
+                  </span>
+                </div>
+              </div>
 
               <div class="row mb-2">
                 <div class="col-sm-4 text-muted">Nama Balita</div>
@@ -253,13 +316,15 @@ function format_tanggal_id(?string $tanggal): string {
 
               <div class="row mb-2">
                 <div class="col-sm-4 text-muted">Tanggal Lahir</div>
-                <div class="col-sm-8"><?= htmlspecialchars(format_tanggal_id($balita['tanggal_lahir'] ?? null)) ?></div>
+                <div class="col-sm-8">
+                  <?= htmlspecialchars(format_tanggal_id($balita['tanggal_lahir'] ?? null)) ?>
+                </div>
               </div>
 
               <div class="row mb-2">
-                <div class="col-sm-4 text-muted">Umur</div>
+                <div class="col-sm-4 text-muted">Umur (dari riwayat)</div>
                 <div class="col-sm-8">
-                  <?= is_numeric($umur_bulan) ? $umur_bulan . ' bulan' : $umur_bulan; ?>
+                  <?= is_numeric($umur_bulan) ? $umur_bulan . ' Tahun' : $umur_bulan; ?>
                 </div>
               </div>
 
@@ -272,9 +337,18 @@ function format_tanggal_id(?string $tanggal): string {
 
               <hr class="my-3">
 
-              <p class="small text-muted mb-1">
-                Jika ada perbedaan data, silakan hubungi petugas kesehatan untuk pembaruan.
+              <p class="small text-muted mb-2">
+                Umur di atas diambil dari <strong>riwayat pemeriksaan gizi</strong> (kolom umur_bulan)
+                pada pemeriksaan terakhir. Jika belum ada riwayat, umur dihitung dari tanggal lahir.
               </p>
+              <div class="d-flex flex-wrap gap-2">
+                <a href="<?= BASE_URL ?>/ortu/pemeriksaan_riwayat.php" class="btn btn-outline-success btn-sm">
+                  <i class="bi bi-clock-history me-1"></i> Lihat Riwayat Gizi
+                </a>
+                <a href="<?= BASE_URL ?>/ortu/grafik_perkembangan.php" class="btn btn-outline-primary btn-sm">
+                  <i class="bi bi-graph-up-arrow me-1"></i> Lihat Grafik Perkembangan
+                </a>
+              </div>
 
             <?php else: ?>
               <div class="text-center py-5">
@@ -292,17 +366,23 @@ function format_tanggal_id(?string $tanggal): string {
         </div>
       </div>
 
-      <!-- Info tambahan / tips -->
-      <div class="col-12 col-lg-4">
+      <!-- Kolom kanan: Info / tips -->
+      <div class="col-12 col-lg-5">
         <div class="card card-soft">
           <div class="card-body">
-            <h6 class="text-uppercase text-muted mb-3">Tips</h6>
+            <h6 class="text-uppercase text-muted mb-3">Informasi & Tips</h6>
             <p class="small text-muted mb-2">
-              Data balita digunakan sebagai dasar pemantauan status gizi dan tumbuh kembang.
+              <strong>1. Konsistensi data:</strong> Pastikan nama, tanggal lahir, dan jenis kelamin balita
+              sudah benar. Perubahan data sebaiknya dikonfirmasi ke petugas kesehatan.
+            </p>
+            <p class="small text-muted mb-2">
+              <strong>2. Pengaruh ke status gizi:</strong> Umur (bulan) dari riwayat pemeriksaan digunakan
+              untuk membaca kurva pertumbuhan dan menentukan kategori status gizi.
             </p>
             <p class="small text-muted mb-0">
-              Pastikan tanggal lahir dan jenis kelamin tercatat dengan benar agar perhitungan umur
-              dan interpretasi status gizi sesuai.
+              <strong>3. Pantau rutin:</strong> Gunakan menu <em>Riwayat Gizi</em> dan
+              <em>Grafik Perkembangan</em> untuk memantau perubahan berat dan tinggi badan balita dari
+              waktu ke waktu.
             </p>
           </div>
         </div>

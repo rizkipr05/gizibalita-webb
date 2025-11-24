@@ -13,7 +13,7 @@ require_ortu();
  * Di tabel balitas, kolom relasinya adalah:
  *   balitas.user_ortu_id => mengarah ke users.id (ortu)
  */
-$ortu_id = $_SESSION['user_id'] ?? 0; // <-- DIBENERIN: sebelumnya $_SESSION['id']
+$ortu_id = $_SESSION['user_id'] ?? 0; // sudah benar
 
 /* ================== AMBIL RIWAYAT PEMERIKSAAN DARI DB ================== */
 
@@ -311,10 +311,9 @@ function badgeClass($status) {
                 <tr>
                   <th style="width: 5%;">#</th>
                   <th>Tanggal</th>
-                  <th>Umur (bln)</th>
+                  <th>Umur (Bulan)</th>
                   <th>Berat (kg)</th>
                   <th>Tinggi (cm)</th>
-                  <th>Lingkar Lengan (cm)</th>
                   <th>Status Gizi</th>
                 </tr>
               </thead>
@@ -327,11 +326,6 @@ function badgeClass($status) {
                     <td><?= (int)$row['umur_bulan']; ?></td>
                     <td><?= number_format($row['berat_badan'], 1); ?></td>
                     <td><?= number_format($row['tinggi_badan'], 1); ?></td>
-                    <td>
-                      <?= $row['lingkar_lengan'] !== null
-                            ? number_format($row['lingkar_lengan'], 1)
-                            : '-'; ?>
-                    </td>
                     <td>
                       <span class="badge badge-status <?= badgeClass($row['status_gizi']); ?>">
                         <?= htmlspecialchars($row['status_gizi']); ?>
@@ -374,16 +368,38 @@ function printRiwayat() {
   const wrap = document.getElementById('riwayatTableWrap');
   if (!wrap) return;
 
-  const printContents = wrap.innerHTML;
+  const tableHTML = wrap.innerHTML;
   const w = window.open('', '_blank');
+  const ortuName = <?= json_encode($_SESSION['name'] ?? ''); ?>;
 
-  w.document.write('<html><head><title>Cetak Riwayat Gizi</title>');
+  w.document.write('<!DOCTYPE html>');
+  w.document.write('<html lang="id"><head><meta charset="UTF-8">');
+  w.document.write('<title>Cetak Riwayat Gizi Balita</title>');
   w.document.write('<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">');
+  w.document.write('<style>');
+  w.document.write('@page { size: A4; margin: 20mm; }');
+  w.document.write('body { font-family: system-ui,-apple-system,"Segoe UI",Arial,sans-serif; font-size: 11pt; color:#212529; }');
+  w.document.write('h1 { font-size: 18pt; margin-bottom: 4px; }');
+  w.document.write('.subtitle { font-size: 10pt; color:#6c757d; margin-bottom: 12px; }');
+  w.document.write('.meta { font-size: 10pt; margin-bottom: 4px; }');
+  w.document.write('table { width:100%; border-collapse: collapse; margin-top: 12px; }');
+  w.document.write('th, td { border:1px solid #dee2e6; padding:6px 8px; font-size:10pt; }');
+  w.document.write('th { background-color:#f1f3f5; text-transform:uppercase; font-weight:600; }');
+  w.document.write('.badge { border-radius:999px; padding:3px 8px; font-size:9pt; }');
+  w.document.write('.bg-success { background-color:#198754 !important; color:#fff !important; }');
+  w.document.write('.bg-danger { background-color:#dc3545 !important; color:#fff !important; }');
+  w.document.write('.bg-warning { background-color:#ffc107 !important; color:#212529 !important; }');
+  w.document.write('.bg-orange { background-color:#ffb347 !important; color:#212529 !important; }');
+  w.document.write('.bg-secondary { background-color:#6c757d !important; color:#fff !important; }');
+  w.document.write('</style>');
   w.document.write('</head><body>');
-  w.document.write('<div class="container mt-4">');
-  w.document.write('<h4 class="mb-3">Riwayat Pemeriksaan Gizi Balita</h4>');
-  w.document.write(printContents);
+  w.document.write('<div>');
+  w.document.write('<h1>Riwayat Pemeriksaan Gizi Balita</h1>');
+  w.document.write('<div class="subtitle">Laporan riwayat pemeriksaan status gizi balita.</div>');
+  w.document.write('<div class="meta">Orang Tua: <strong>' + (ortuName || '-') + '</strong></div>');
+  w.document.write('<div class="meta">Dicetak pada: ' + new Date().toLocaleString("id-ID") + '</div>');
   w.document.write('</div>');
+  w.document.write(tableHTML);
   w.document.write('</body></html>');
 
   w.document.close();

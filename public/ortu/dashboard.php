@@ -37,20 +37,51 @@ if ($ortu_id > 0) {
     }
 }
 
-/* Hitung umur bulan (tahun*12 + bulan) */
-$umur_bulan = "-";
+/* =======================================================
+   1.b Ambil UMUR dari RIWAYAT GIZI (pemeriksaans.umur_bulan)
+       - diambil pemeriksaan TERBARU
+   ======================================================= */
+$umur_bulan = "-"; // default
 
-if ($balita && !empty($balita['tanggal_lahir']) && $balita['tanggal_lahir'] !== '0000-00-00') {
+if ($balita) {
+    try {
+        $sql = "
+            SELECT umur_bulan
+            FROM pemeriksaans
+            WHERE balita_id = ?
+            ORDER BY tanggal_pemeriksaan DESC, id DESC
+            LIMIT 1
+        ";
+        $stmt = $mysqli->prepare($sql);
+        if ($stmt) {
+            $balita_id = (int)$balita['id'];
+            $stmt->bind_param("i", $balita_id);
+            $stmt->execute();
+            $res = $stmt->get_result();
+            if ($row = $res->fetch_assoc()) {
+                // umur dari RIWAYAT GIZI
+                $umur_bulan = (int)$row['umur_bulan'];
+            }
+            $stmt->close();
+        }
+    } catch (Throwable $e) {
+        // kalau error, biarkan nanti jatuh ke perhitungan tanggal lahir
+        // error_log('Error ambil umur dari riwayat: '.$e->getMessage());
+    }
+}
+
+/* =====================================================
+   1.c Kalau BELUM ada riwayat, baru hitung dari lahir
+        (konsisten dengan balita_detail.php)
+   ===================================================== */
+if ($umur_bulan === "-" && $balita && !empty($balita['tanggal_lahir']) && $balita['tanggal_lahir'] !== '0000-00-00') {
     try {
         $lahir = new DateTime(trim($balita['tanggal_lahir']));
         $now   = new DateTime();
 
         if ($lahir <= $now) {
             $diff       = $now->diff($lahir);
-            // Umur bulan = jumlah tahun * 12 + sisa bulan
             $umur_bulan = ($diff->y * 12) + $diff->m;
-
-            // Kalau hasil minus (tanggal lahir lebih besar dari hari ini), paksa 0
             if ($umur_bulan < 0) {
                 $umur_bulan = 0;
             }
@@ -303,7 +334,7 @@ function badgeClass($status) {
             <?php if ($balita): ?>
               <h4 class="mb-1"><?= htmlspecialchars($balita['nama_balita']) ?></h4>
               <p class="text-muted mb-1">
-                Umur: <?= is_numeric($umur_bulan) ? $umur_bulan . ' bulan' : $umur_bulan; ?>
+                Umur: <?= is_numeric($umur_bulan) ? $umur_bulan . ' Tahun' : $umur_bulan; ?>
               </p>
               <p class="text-muted small mb-3">
                 Jenis Kelamin: <?= $balita['jenis_kelamin'] === 'L' ? 'Laki-laki' : 'Perempuan' ?>
